@@ -14,13 +14,11 @@ def get_dem_statistics(dem, metadata, chunk_pixels=1_000_000, median_step=16):
     nodata = metadata.get("nodata")
     scale = float(metadata.get("scale_factor", 1.0))
     offset = float(metadata.get("offset", 0.0))
-
     count = 0
     minimum = math.inf
     maximum = -math.inf
     total = 0.0
     total_sq = 0.0
-
     for start in range(0, flat.size, chunk_pixels):
         part = flat[start:start + chunk_pixels]
         valid = _valid_mask(part, nodata)
@@ -36,13 +34,11 @@ def get_dem_statistics(dem, metadata, chunk_pixels=1_000_000, median_step=16):
         maximum = max(maximum, float(np.max(values)))
         total += float(np.sum(values, dtype=np.float64))
         total_sq += float(np.sum(values * values, dtype=np.float64))
-
     if count == 0:
         raise ValueError("Rasterda geçerli piksel bulunamadı. NoData değerini kontrol et.")
 
     mean = total / count
     variance = max(total_sq / count - mean * mean, 0.0)
-
     median_source = dem[::median_step, ::median_step]
     median_valid = _valid_mask(median_source, nodata)
     median_values = median_source[median_valid].astype(np.float32)
@@ -51,7 +47,6 @@ def get_dem_statistics(dem, metadata, chunk_pixels=1_000_000, median_step=16):
     if offset != 0.0:
         median_values += offset
     median_estimate = float(np.median(median_values)) if median_values.size else float("nan")
-
     return {
         "min": minimum,
         "max": maximum,
@@ -75,15 +70,10 @@ def make_display_sample(dem, metadata, step=8):
 
 
 def calculate_sampled_slope(dem, metadata, step=8):
-    """Calculate local central-difference slope at regularly spaced sample cells.
-
-    The derivative uses adjacent native raster pixels; `step` only controls output
-    sample spacing, keeping peak memory much lower than a full-resolution gradient.
-    """
+    """Calculate local central-difference slope at regularly spaced sample cells."""
     rows_count, cols_count = dem.shape
     if rows_count < 3 or cols_count < 3:
         raise ValueError("Eğim için raster en az 3x3 piksel olmalı.")
-
     rows = np.arange(1, rows_count - 1, step, dtype=np.int32)
     cols = np.arange(1, cols_count - 1, step, dtype=np.int32)
     if rows.size == 0 or cols.size == 0:
@@ -91,13 +81,11 @@ def calculate_sampled_slope(dem, metadata, step=8):
 
     row_grid, col_grid = np.ix_(rows, cols)
     nodata = metadata.get("nodata")
-
     center = dem[row_grid, col_grid]
     left = dem[row_grid, col_grid - 1].astype(np.float32)
     right = dem[row_grid, col_grid + 1].astype(np.float32)
     up = dem[row_grid - 1, col_grid].astype(np.float32)
     down = dem[row_grid + 1, col_grid].astype(np.float32)
-
     valid = np.ones(center.shape, dtype=bool)
     if nodata is not None:
         valid &= center != nodata
@@ -105,7 +93,6 @@ def calculate_sampled_slope(dem, metadata, step=8):
         valid &= dem[row_grid, col_grid + 1] != nodata
         valid &= dem[row_grid - 1, col_grid] != nodata
         valid &= dem[row_grid + 1, col_grid] != nodata
-
     scale = float(metadata.get("scale_factor", 1.0))
     dz_dx = ((right - left) * scale) / (2.0 * float(metadata["pixel_x"]))
     dz_dy = ((down - up) * scale) / (2.0 * float(metadata["pixel_y"]))

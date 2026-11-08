@@ -1,1 +1,1 @@
-"""Mars Base Scout analysis package."""
+"""Mars Base Scout application modules."""
