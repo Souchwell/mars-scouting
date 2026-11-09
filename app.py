@@ -11,6 +11,11 @@ from src.analysis import (
     get_dem_statistics,
     make_display_sample,
 )
+from src.study_area import (
+    DEFAULT_STUDY_AREA_VERTICES,
+    extract_study_area,
+    geographic_to_pixel,
+)
 
 DEFAULT_IMG_URL = (
     "https://pds-geosciences.wustl.edu/mgs/urn-nasa-pds-mgs_mola_topography_derived/"
@@ -118,6 +123,8 @@ if source_mode == "PDS arşivinden indir (Render için önerilen)":
                 img_url,
                 progress_callback=update_progress,
             )
+            st.subheader("MOLA ENVI Header - Debug")
+            st.code(new_hdr.decode("utf-8", errors="replace"))
             old_product = st.session_state.get("pds_product")
             st.session_state["pds_product"] = {
                 "url": normalized_url,
@@ -258,6 +265,150 @@ fig.colorbar(image, ax=ax, label=f"Raster yüksekliği ({metadata['height_unit']
 fig.tight_layout()
 st.pyplot(fig, width="stretch")
 plt.close(fig)
+# ==========================================================
+# LYCUS SULCI - UCGEN CALISMA ALANI
+# ==========================================================
+
+st.divider()
+st.subheader("Lycus Sulci — Üçgen çalışma alanı")
+
+st.write(
+    "Önceden belirlenen üçgen bölge MOLA rasterından "
+    "otomatik olarak kesilir. Yalnızca poligon içerisinde "
+    "kalan geçerli pikseller analiz edilir."
+)
+
+try:
+    study_area = extract_study_area(
+        dem,
+        metadata,
+        vertices=DEFAULT_STUDY_AREA_VERTICES,
+    )
+
+    st.success("Üçgen çalışma alanı MOLA rasterından başarıyla çıkarıldı.")
+
+    area_cols = st.columns(5)
+
+    area_cols[0].metric(
+        "Minimum yükseklik",
+        f"{study_area['min_elevation']:.2f} {metadata['height_unit']}",
+    )
+
+    area_cols[1].metric(
+        "Maksimum yükseklik",
+        f"{study_area['max_elevation']:.2f} {metadata['height_unit']}",
+    )
+
+    area_cols[2].metric(
+        "Ortalama yükseklik",
+        f"{study_area['mean_elevation']:.2f} {metadata['height_unit']}",
+    )
+
+    area_cols[3].metric(
+        "Medyan yükseklik",
+        f"{study_area['median_elevation']:.2f} {metadata['height_unit']}",
+    )
+
+    area_cols[4].metric(
+        "Geçerli piksel",
+        f"{study_area['valid_pixels']:,}",
+    )
+
+    st.caption(
+        f"Raster penceresi: "
+        f"{study_area['row_start']}–{study_area['row_stop']} satır, "
+        f"{study_area['col_start']}–{study_area['col_stop']} sütun."
+    )
+
+    # Üçgen alanın yükseklik haritası.
+    fig_area, ax_area = plt.subplots(figsize=(12, 7))
+
+    area_image = ax_area.imshow(
+        np.ma.masked_invalid(study_area["elevation"]),
+        cmap="terrain",
+        origin="upper",
+        interpolation="nearest",
+    )
+
+    # Üçgen sınırını haritanın üzerine çiz.
+    vertices = study_area["vertices"]
+
+    polygon_lon = [point[0] for point in vertices]
+    polygon_lat = [point[1] for point in vertices]
+
+    polygon_lon.append(polygon_lon[0])
+    polygon_lat.append(polygon_lat[0])
+
+    # Raster koordinatlarıyla aynı eksenlerde çiz.
+    map_info = study_area["map_info"]
+
+    polygon_cols = [
+        geographic_to_pixel(lon, lat, map_info)[1]
+        - study_area["col_start"]
+        for lon, lat in zip(polygon_lon, polygon_lat)
+    ]
+
+    polygon_rows = [
+        geographic_to_pixel(lon, lat, map_info)[0]
+        - study_area["row_start"]
+        for lon, lat in zip(polygon_lon, polygon_lat)
+    ]
+
+    ax_area.plot(
+        polygon_cols,
+        polygon_rows,
+        linewidth=2,
+        color="red",
+    )
+
+    for index, (x, y) in enumerate(
+        zip(polygon_cols[:-1], polygon_rows[:-1])
+    ):
+        ax_area.scatter(x, y, color="red", s=35)
+        ax_area.annotate(
+            chr(65 + index),
+            (x, y),
+            xytext=(6, 6),
+            textcoords="offset points",
+            color="red",
+            fontsize=10,
+        )
+
+    ax_area.set_title(
+        "Lycus Sulci — Üçgen çalışma alanı MOLA yükseklik haritası"
+    )
+
+    ax_area.set_xlabel("Raster sütunu")
+    ax_area.set_ylabel("Raster satırı")
+
+    fig_area.colorbar(
+        area_image,
+        ax=ax_area,
+        label=f"Yükseklik ({metadata['height_unit']})",
+    )
+
+    fig_area.tight_layout()
+
+    st.pyplot(fig_area, width="stretch")
+    plt.close(fig_area)
+
+    st.caption(
+        "Kırmızı çizgi çalışma alanının sınırlarını gösterir. "
+        "Haritadaki yükseklikler MOLA verisinden alınmıştır. "
+        "Bu analiz henüz rover geçiş güvenliği değerlendirmesi değildir."
+    )
+
+    with st.expander("Çalışma alanı koordinatları"):
+        for index, (lon, lat) in enumerate(vertices):
+            st.write(
+                f"{chr(65 + index)}: "
+                f"{lon:.3f}°E, {lat:.3f}°N"
+            )
+
+except Exception as exc:
+    st.error(
+        f"Üçgen çalışma alanı analiz edilemedi: {exc}"
+    )
 
 if run_slope:
     st.divider()

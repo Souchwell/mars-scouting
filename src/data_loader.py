@@ -29,23 +29,63 @@ def _label_text_value(text: str, key: str) -> str | None:
     return match.group(1).strip().strip('"').strip("'")
 
 
-def _parse_map_info(text: str) -> tuple[float, float, str | None]:
-    match = re.search(r"(?im)^\s*map info\s*=\s*\{([^}]*)\}", text)
+def _parse_map_info(text: str) -> dict[str, Any]:
+    match = re.search(
+        r"(?im)^\s*map\s+info\s*=\s*\{([^}]*)\}",
+        text,
+    )
+
     if not match:
-        return 463.0576672, 463.0576672, None
+        raise ValueError("ENVI HDR içinde map info bulunamadı.")
+
     raw = match.group(1)
     parts = [part.strip() for part in raw.split(",")]
-    pixel_x = pixel_y = 463.0576672
-    if len(parts) >= 7:
-        try:
-            pixel_x = abs(float(parts[5]))
-            pixel_y = abs(float(parts[6]))
-        except ValueError as exc:
-            raise ValueError("ENVI map info içindeki piksel boyutu okunamadı.") from exc
-    if pixel_x <= 0 or pixel_y <= 0:
-        raise ValueError("ENVI başlığındaki piksel boyutu sıfır veya negatif olamaz.")
-    return pixel_x, pixel_y, raw
 
+    if len(parts) < 7:
+        raise ValueError("ENVI map info alanı eksik.")
+
+    try:
+        return {
+            "raw": raw,
+            "projection_name": parts[0],
+            "reference_col": float(parts[1]),
+            "reference_row": float(parts[2]),
+            "map_x": float(parts[3]),
+            "map_y": float(parts[4]),
+            "pixel_x": abs(float(parts[5])),
+            "pixel_y": abs(float(parts[6])),
+            "units": parts[-1].split("=", 1)[-1].strip()
+            if "units=" in parts[-1].lower()
+            else None,
+        }
+    except ValueError as exc:
+        raise ValueError(
+            "ENVI map info koordinatları okunamadı."
+        ) from exc
+def _parse_projection_info(text: str) -> dict[str, Any]:
+    match = re.search(
+        r"(?im)^\s*projection\s+info\s*=\s*\{([^}]*)\}",
+        text,
+    )
+
+    if not match:
+        raise ValueError("ENVI projection info bulunamadı.")
+
+    parts = [part.strip() for part in match.group(1).split(",")]
+
+    if len(parts) < 4:
+        raise ValueError("ENVI projection info eksik.")
+
+    try:
+        return {
+            "projection_code": int(parts[0]),
+            "semi_major_axis": float(parts[1]),
+            "central_meridian": float(parts[3]),
+        }
+    except ValueError as exc:
+        raise ValueError(
+            "Projeksiyon parametreleri okunamadı."
+        ) from exc
 
 def parse_envi_header(hdr_bytes: bytes | bytearray | memoryview) -> dict[str, Any]:
     """Parse the small ENVI header and return raster layout information."""
@@ -84,8 +124,8 @@ def parse_envi_header(hdr_bytes: bytes | bytearray | memoryview) -> dict[str, An
 
     code, dtype_name = envi_types[data_type]
     dtype = np.dtype("u1") if data_type == 1 else np.dtype((">" if byte_order == 1 else "<") + code)
-    pixel_x, pixel_y, map_info_raw = _parse_map_info(text)
-
+    map_info = _parse_map_info(text)
+    projection_info = _parse_projection_info(text)
     return {
         "samples": samples,
         "lines": lines,
@@ -96,9 +136,18 @@ def parse_envi_header(hdr_bytes: bytes | bytearray | memoryview) -> dict[str, An
         "nodata": nodata,
         "dtype": dtype,
         "dtype_name": dtype_name,
-        "pixel_x": pixel_x,
-        "pixel_y": pixel_y,
-        "map_info_raw": map_info_raw,
+        "pixel_x": map_info["pixel_x"],
+        "pixel_y": map_info["pixel_y"],
+        "map_info_raw": map_info["raw"],
+        "map_reference_col": map_info["reference_col"],
+        "map_reference_row": map_info["reference_row"],
+        "map_x": map_info["map_x"],
+        "map_y": map_info["map_y"],
+        "map_units": map_info["units"],
+        "projection_name": map_info["projection_name"],
+        "projection_code": projection_info["projection_code"],
+        "semi_major_axis": projection_info["semi_major_axis"],
+        "central_meridian": projection_info["central_meridian"],
     }
 
 

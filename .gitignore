@@ -4,11 +4,12 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 .DS_Store
+*.img
+*.hdr
+*.lbl
+*.part
 # Uploaded science data is not part of the source repository.
 data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
-*.img
-*.hdr
-*.lbl
