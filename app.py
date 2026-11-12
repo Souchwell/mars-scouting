@@ -406,9 +406,7 @@ try:
             )
 
 except Exception as exc:
-    st.error(
-        f"Üçgen çalışma alanı analiz edilemedi: {exc}"
-    )
+    st.exception(exc)
 
 if run_slope:
     st.divider()
