@@ -1,8 +1,19 @@
 from pathlib import Path
+import importlib
 import os
-import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
+import tempfile
+import shutil
+
+try:
+    st = importlib.import_module("streamlit")
+except ModuleNotFoundError as exc:
+    if exc.name != "streamlit":
+        raise
+    raise RuntimeError(
+        "Streamlit is required to run this app. Install it with `python -m pip install streamlit`."
+    ) from exc
 
 from src.data_loader import load_mola_envi, load_mola_envi_from_path
 from src.pds_download import download_pds_product
@@ -79,7 +90,33 @@ def identify_uploads(files):
     if found["lbl"] is not None and Path(found["lbl"].name).stem.lower() != stems[0]:
         raise ValueError("LBL dosyasının adı IMG ve HDR dosyalarıyla eşleşmiyor.")
     return found
+MAX_LOCAL_IMG_SIZE = 50 * 1024 * 1024
 
+
+def save_uploaded_img_to_disk(uploaded_file):
+    if uploaded_file.size > MAX_LOCAL_IMG_SIZE:
+        raise ValueError(
+            "IMG dosyası 50 MiB sınırını aşıyor."
+        )
+
+    temp_dir = tempfile.mkdtemp(prefix="mars_dem_")
+    img_path = Path(temp_dir) / uploaded_file.name
+
+    try:
+        uploaded_file.seek(0)
+
+        with open(img_path, "wb") as output:
+            shutil.copyfileobj(
+                uploaded_file,
+                output,
+                length=1024 * 1024
+            )
+
+        return temp_dir, img_path
+
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 dem = None
 metadata = None
@@ -178,30 +215,72 @@ if source_mode == "PDS arşivinden indir (Render için önerilen)":
 
 else:
     st.subheader("Bilgisayardan MOLA dosyası yükle")
+
     st.warning(
-        "Bu yöntem yerel kullanım için uygundur. Render Free üzerinde büyük IMG dosyaları "
-        "tarayıcı yüklemesi sırasında 502 hatasına yol açabilir; Render'da PDS indirme yöntemini kullan."
+        "Bu yöntem yerel kullanım içindir. Render Free üzerinde büyük IMG "
+        "dosyaları tarayıcı yüklemesi sırasında sorun çıkarabilir. "
+        "Render'da PDS indirme yöntemini kullan."
     )
-    uploaded_files = st.file_uploader(
-        "IMG, HDR ve isteğe bağlı LBL dosyalarını birlikte seç",
-        type=["img", "hdr", "lbl"],
-        accept_multiple_files=True,
-        help="Aynı ürünün aynı dosya adına sahip dosyalarını seç.",
-    )
-    if not uploaded_files:
-        st.info("Devam etmek için .img ve .hdr dosyalarını seç.")
-        st.stop()
-    try:
-        selected = identify_uploads(uploaded_files)
-        dem, metadata = load_mola_envi(
-            img_buffer=selected["img"].getbuffer(),
-            hdr_bytes=selected["hdr"].getvalue(),
-            lbl_bytes=selected["lbl"].getvalue() if selected["lbl"] else None,
+
+    MAX_LOCAL_IMG_SIZE = 50 * 1024 * 1024
+
+    with st.form("local_dem_upload_form"):
+        uploaded_files = st.file_uploader(
+            "IMG, HDR ve isteğe bağlı LBL dosyalarını birlikte seç",
+            type=["img", "hdr", "lbl"],
+            accept_multiple_files=True,
+            help="Aynı ürünün aynı dosya adına sahip dosyalarını seç. IMG dosyası en fazla 50 MiB olabilir.",
         )
-    except Exception as exc:
-        st.error(f"MOLA verisi okunamadı: {exc}")
-        st.stop()
-    metadata["source_mode"] = "Bilgisayardan yükleme"
+
+        upload_submitted = st.form_submit_button("Dosyaları yükle ve işle")
+
+    if upload_submitted:
+        if not uploaded_files:
+            st.error("Devam etmek için .img ve .hdr dosyalarını seç.")
+            st.stop()
+
+        temp_dir = None
+
+        try:
+            selected = identify_uploads(uploaded_files)
+
+            if selected["img"].size > MAX_LOCAL_IMG_SIZE:
+                raise ValueError("IMG dosyası 50 MiB sınırını aşıyor.")
+
+            temp_dir, img_path = save_uploaded_img_to_disk(
+                selected["img"]
+            )
+
+            dem, metadata = load_mola_envi_from_path(
+                img_path=img_path,
+                hdr_bytes=selected["hdr"].getvalue(),
+                lbl_bytes=(
+                    selected["lbl"].getvalue()
+                    if selected["lbl"] else None
+                ),
+            )
+
+            metadata["source_mode"] = "Bilgisayardan yükleme"
+            metadata["temporary_directory"] = temp_dir
+
+            old_temp_dir = st.session_state.get("local_dem_directory")
+
+            if old_temp_dir and old_temp_dir != temp_dir:
+                shutil.rmtree(old_temp_dir, ignore_errors=True)
+
+            st.session_state["local_dem_directory"] = temp_dir
+            st.session_state["local_dem"] = dem
+            st.session_state["local_metadata"] = metadata
+
+        except Exception as exc:
+            if temp_dir:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+            st.error(f"MOLA verisi okunamadı: {exc}")
+            st.stop()
+
+    dem = st.session_state.get("local_dem")
+    metadata = st.session_state.get("local_metadata")
 
 if dem is None or metadata is None:
     st.stop()
@@ -406,7 +485,9 @@ try:
             )
 
 except Exception as exc:
-    st.exception(exc)
+    st.error(
+        f"Üçgen çalışma alanı analiz edilemedi: {exc}"
+    )
 
 if run_slope:
     st.divider()
