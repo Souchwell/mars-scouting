@@ -1,7 +1,7 @@
 ﻿[server]
 headless = true
 # MOLA MEG128 IMG is about 124 MiB. Keep a margin while avoiding an unlimited upload size.
-maxUploadSize = 50
+maxUploadSize = 150
 maxMessageSize = 200
 runOnSave = true
 
