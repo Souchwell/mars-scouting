@@ -14,7 +14,6 @@ from src.emars_processing import (
     resolve_atmospheric_map_variables,
     get_atmospheric_map_field,
     plot_emars_map,
-    plot_dust_opacity_map,
 )
 
 import matplotlib.pyplot as plt
@@ -551,7 +550,8 @@ if source_mode == "pds":
         "txt": "MCD atmosfer verisi (.txt)",
     }
     st.subheader("PDS ar\u015fiv verileri")
-    st.write("Desteklenen PDS \u00fcr\u00fcnlerinin do\u011frudan HTTPS URL adreslerini girin. ENVI IMG URL\u2019si e\u015fle\u015fen HDR dosyas\u0131n\u0131 ve iste\u011fe ba\u011fl\u0131 LBL dosyas\u0131n\u0131 da al\u0131r.")
+    st.write("Desteklenen verilerin do\u011frudan HTTPS URL adreslerini girin. ENVI IMG adresi e\u015fle\u015fen HDR dosyas\u0131n\u0131 ve iste\u011fe ba\u011fl\u0131 LBL dosyas\u0131n\u0131 da al\u0131r.")
+    st.caption("PDS d\u0131\u015f\u0131 bir HTTPS alan ad\u0131 i\u00e7in Render ortam\u0131nda MARS_DATA_ALLOWED_HOSTS de\u011fi\u015fkenini ayarlay\u0131n.")
     url_count = int(st.session_state.get("pds_url_count", 1))
     if st.button("Daha fazla URL ekle", key="add_pds_url"):
         st.session_state["pds_url_count"] = url_count + 1
@@ -567,7 +567,7 @@ if source_mode == "pds":
         pds_url = st.text_input(
             f"PDS dosya URL\u2019si {index + 1}",
             value="",
-            placeholder="https://pds-geosciences.wustl.edu/.../product.ext",
+            placeholder="https://your-host.example/path/product.ext",
             key=f"pds_img_url_{index}",
         )
         url_rows.append((pds_type, pds_url.strip()))

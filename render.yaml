@@ -4,7 +4,6 @@ services:
     runtime: python
     plan: free
     region: frankfurt
-    rootDir: mars_base_scout_render
     buildCommand: pip install -r requirements.txt
     startCommand: python -m streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
     healthCheckPath: /_stcore/health

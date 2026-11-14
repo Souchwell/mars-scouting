@@ -1,36 +1,37 @@
-# Mars Base Scout — PDS streaming / Render sürümü
+# Mars Base Scout
 
-Bu sürüm MOLA MEGDR ENVI rasterlarını PDS arşivinden doğrudan indirir. IMG dosyası tarayıcıdan Render'a yüklenmez; Render sunucusu PDS'den akış hâlinde indirip geçici diske yazar ve NumPy `memmap` ile dosya tabanlı olarak açar.
+Mars yüzey ve atmosfer verilerini inceleyen Streamlit uygulaması. MOLA/DEM, EMARS NetCDF ve MCD TXT verileriyle Lycus Sulci çevresinde arazi analizi, iniş adayı sıralaması ve araştırma bölgesine rota ön değerlendirmesi sağlar.
 
-## Yeni özellikler
+## Özellikler
 
-- PDS IMG URL'sinden eşleşen `.hdr` ve varsa `.lbl` dosyalarını otomatik bulma
-- Yalnızca `pds-geosciences.wustl.edu` alan adından HTTPS indirmeye izin verme
-- IMG dosyasını 1 MiB parçalarla geçici diske indirme ve indirme ilerlemesini gösterme
-- Rasterı `numpy.memmap` ile açma; IMG'nin tamamını RAM'e kopyalamama
-- Yerel geliştirme için eski çoklu dosya yükleme seçeneğini koruma
-- Parçalı istatistik, örneklenmiş yükseklik haritası ve isteğe bağlı örneklenmiş eğim analizi
-- Render Blueprint yapılandırması
-- EMARS NetCDF haritaları: W-E u, N-S v ve toz optik derinliği
-- MCD TXT çıktılarındaki sıcaklık katmanlarını ve rüzgâr bileşenlerini ayrıştırma
+- MOLA ENVI rasterını (`.img` + `.hdr`, isteğe bağlı `.lbl`) doğrudan HTTPS kaynağından indirme ve bellek eşlemeli okuma
+- Tek bantlı coğrafi GeoTIFF (`.tif` / `.tiff`) DEM desteği
+- EMARS NetCDF (`.nc`) içinde W–E rüzgâr bileşeni (`u`), N–S bileşeni (`v`) ve toz optik derinliği (`tauref` / `tod` / `dod`) haritaları
+- MCD TXT çıktılarından sıcaklık katmanlarını değişken adlarıyla haritalama
+- Eğim, pürüzlülük, termal koşullar, rüzgâr/toz ve veri güvenilirliğini birleştiren yumuşak maliyetli uygunluk ön değerlendirmesi
+- Dijkstra aramasıyla iniş adaylarından araştırma alanının yaklaşım kenarına rota üretimi
+- Türkçe ve İngilizce arayüz
 
-## Atmosfer verileri
+## Veri kaynakları
 
-Uygulamadaki **Proje verileri** alanından DEM ve atmosfer dosyaları tek formda
-birlikte yüklenebilir: MOLA ENVI `.img` + `.hdr` (isteğe bağlı `.lbl`), tek bantlı
-coğrafi GeoTIFF `.tif/.tiff`, EMARS NetCDF `.nc` ve MCD `.txt` çıktıları.
-GeoTIFF CRS'i coğrafi enlem-boylam olmalı ve yükseklik birimi metadata içinde
-belirtilmelidir. Daha ayrıntılı DEM gridleri desteklenir; rasterın tamamı belleğe
-alındığından çok büyük GeoTIFF dosyaları için sunucu belleği dikkate alınmalıdır.
-NetCDF yüklemesinde bir zaman indeksi seçilir ve o zamana ait üç değişken haritası sekmelerde gösterilir: W-E rüzgâr bileşeni (u), N-S bileşeni (v) ve toz optik derinliği (tauref/tod/dod). Basınca bağlı alanlarda yüzeye en yakın basınç seviyesi seçilir. MCD TXT dosyalarındaki sıcaklık katmanları ayrı sekmelerde ve değişken adlarıyla gösterilir.
+Uygulamada **Proje verileri** bölümünden DEM ve atmosfer dosyaları tek seferde seçilebilir. Desteklenen dosyalar:
 
-Uygunluk ön değerlendirmesi, eğim, pürüzlülük, yüzey sıcaklığı, rüzgâr/toz ve veri güvenilirliğini tek bir yumuşak maliyet fonksiyonuyla birleştirir. Eksik katmanlar nötr kabul edilir ve güvenilirlik puanını düşürür; aralık sınırları keskin ret üretmez. Başlangıç eşikleri gösterge amaçlıdır ve görev doğrulamalı güvenlik sınırları değildir.
+| Veri | Biçim | Gerekenler |
+| --- | --- | --- |
+| MOLA ENVI DEM | `.img` | Aynı klasörde aynı temel ada sahip `.hdr`; `.lbl` isteğe bağlı |
+| Coğrafi yükseklik rasterı | `.tif`, `.tiff` | Tek bant; coğrafi koordinat sistemi ve yükseklik birimi metadata içinde bulunmalı |
+| EMARS atmosferi | `.nc` | NetCDF; atmosfer değişkenleri ve koordinatları tanınabilir olmalı |
+| MCD atmosferi | `.txt` | MCD metin çıktısı; sıcaklık katmanları desteklenir |
 
-İniş adaylarından araştırma bölgesine rota, çok kaynaklı Dijkstra aramasıyla hesaplanır. Kullanıcının verdiği X/Y değerleri binlik derece olarak yorumlanır; rota hedef koordinatına değil, tanımlı araştırma dikdörtgeninin en düşük maliyetli yaklaşım kenarına bağlanır. Her rotanın uzunluğu, toplam maliyeti ve arazi/atmosfer değişken özetleri listelenir.
+PDS ekranında her dosyanın doğrudan HTTPS indirme adresini girip dosya türünü seçin. İçerik dönüştürülmeden indirilir; `.img` dosyasının `.hdr` dosyası aynı klasörde ve aynı temel adda olmalıdır. Varsayılan izinli sunucu `pds-geosciences.wustl.edu` alan adıdır. Başka bir herkese açık dosya sunucusuna izin vermek için Render ortam değişkeni `MARS_DATA_ALLOWED_HOSTS` içine tam alan adını yazın; birden fazla alan adını virgülle ayırın. Protokol ve yol eklemeyin. URL doğrudan dosyaya gitmeli; yönlendirme ve sorgu parametreleri kabul edilmez.
 
-## PDS data sources
+URL kullanmak tarayıcıdan uygulamaya dosya yükleme gereğini kaldırır, ancak analiz yine sunucu belleğini ve işlemcisini kullanır. ENVI rasterı bellek eşlemeli açılır; yerel pürüzlülük hesabı ara belleği satır bloklarıyla sınırlar. Büyük GeoTIFF ve NetCDF dosyaları, özellikle 512 MB bellekli servislerde, yine de kaynak sınırına ulaşabilir.
 
-The PDS URL workflow accepts MOLA ENVI `.img` with a matching `.hdr` (optional `.lbl`), GeoTIFF DEM `.tif/.tiff`, EMARS `.nc`, and MCD `.txt`. Enter each direct HTTPS product URL and choose its type; the app downloads the products and processes the atmosphere files alongside the selected DEM. Downloads are restricted to the configured PDS host and format-specific size limits.
+## Analiz ve bilimsel sınırlar
+
+Uygunluk ön değerlendirmesi eğim, pürüzlülük, yüzey sıcaklığı, rüzgâr/toz ve veri güvenilirliğini yumuşak maliyetlerle birleştirir. Eksik katmanlar nötr katkı verirken veri güvenilirliği puanını düşürür. Rota araması Dijkstra algoritmasını kullanır ve tanımlı araştırma dikdörtgeninin en düşük maliyetli yaklaşım kenarına bağlanır.
+
+Bu puanlar ve rotalar keşif amaçlı ön değerlendirmedir; görev doğrulamalı iniş güvenliği ölçütü değildir. MEG128 ürünleri ekvator çevresinde yaklaşık 463 m/piksel nominal çözünürlük sunar ve küçük kaya/blok ya da metre ölçekli iniş tehlikelerini göstermez. NoData hücreleri analiz dışı tutulur. Kullanılan ürünün LBL metadata içindeki birim, ölçekleme ve eksik değer tanımlarını bilimsel sonuçları raporlamadan önce doğrulayın.
 
 ## Yerel çalıştırma
 
@@ -42,40 +43,8 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-Yerel kullanımda da PDS URL'sinden indirme seçeneği çalışır. Küçük test verileri için bilgisayardan yükleme modu da korunmuştur.
+## Render dağıtımı
 
-## GitHub / Render dosya yapısı
+`render.yaml`, deponun kök dizinindedir. Render Blueprint'i bu dosyadan oluşturduğunuzda uygulama depo kökünden kurulur ve başlatılır. Servis geçici disk kullanır; yeniden başlatma sonrasında PDS dosyalarının yeniden indirilmesi gerekir.
 
-Bu klasör mevcut depodaki `mars_base_scout_render` klasörünün içeriğinin yerini alacak şekilde hazırlanmıştır. Depo yapısı:
-
-```text
-mars-scouting/
-└── mars_base_scout_render/
-    ├── app.py
-    ├── render.yaml
-    ├── requirements.txt
-    ├── README.md
-    └── src/
-        ├── __init__.py
-        ├── analysis.py
-        ├── data_loader.py
-        └── pds_download.py
-```
-
-`render.yaml` içindeki `rootDir: mars_base_scout_render` ayarı depo kökündeki Blueprint dosyasından çalışacak şekilde bırakılmıştır. Blueprint Path: `mars_base_scout_render/render.yaml`.
-
-## Güvenlik ve sınırlar
-
-- PDS URL downloads are restricted to direct HTTPS products on `pds-geosciences.wustl.edu`, with supported file extensions and size limits.
-- IMG için 350 MiB üst sınır vardır. Metadata dosyaları 5 MiB ile sınırlandırılmıştır.
-- Dosyalar Render'ın geçici diskine indirilir. Render Free dosya sistemi kalıcı değildir; servis yeniden başlarsa dosya tekrar indirilmelidir.
-- `memmap` tam rasterı belleğe kopyalamaz, ancak istatistik ve çizim sırasında yine de bellek/CPU kullanılır. Render Free üzerindeki her MOLA ürünü için performans garantisi yoktur.
-- İndirme başarısız olursa Runtime Logs ve arayüzdeki hata mesajını kontrol et.
-
-## Bilimsel sınırlar
-
-- MEG128 ekvator çevresinde nominal yaklaşık 463 m/piksel çözünürlüktedir.
-- Bu ölçek bölgesel topografya ve genel eğim incelemesi içindir; küçük kaya, blok ve metre ölçekli iniş tehlikelerini göstermez.
-- Birleşik uygunluk göstergesi keşif amaçlıdır; otomatik iniş alanı seçmez ve görev doğrulamalı iniş güvenliği puanı üretmez.
-- NoData pikselleri güvenli arazi olarak yorumlanmaz; analiz dışında tutulur.
-- PDS LBL içindeki birim, ölçekleme ve missing-value alanlarını bilimsel sonuçları raporlamadan önce kontrol et.
+`.streamlit/config.toml` dosyası yükleme boyutunu 150 MiB ile sınırlar. PDS URL indirmelerinde desteklenen biçime göre uygulama düzeyinde dosya boyutu sınırları uygulanır. PDS indirmeleri yalnızca yapılandırılmış HTTPS alan adlarını kabul eder; IP adresleri, yönlendirmeler, sorgu parametreleri ve desteklenmeyen uzantılar reddedilir.

@@ -176,67 +176,48 @@ def calculate_slope(dem, metadata):
 
 
 
-def calculate_local_roughness(dem: np.ndarray) -> np.ndarray:
+def calculate_local_roughness(dem: np.ndarray, chunk_rows: int = 128) -> np.ndarray:
+    """Calculate 3x3 plane-residual roughness in bounded row blocks.
+
+    The result matches the original least-squares plane residual while keeping
+    intermediate arrays proportional to ``chunk_rows * raster_width`` rather
+    than to the complete raster area.
     """
-    3x3 komşulukta yerel düzlemden sapmanın RMS değerini hesaplar.
-
-    Sonuç metre cinsinden yerel pürüzlülük göstergesidir.
-    Düzlemsel eğim etkisini azaltmak için her pencereye
-    en küçük kareler yöntemiyle bir düzlem uydurulur.
-
-    Pencere içindeki 9 pikselin tamamı geçerli olmalıdır.
-    Kenar pikselleri NaN bırakılır.
-    """
-
     from numpy.lib.stride_tricks import sliding_window_view
 
-    dem = np.asarray(dem, dtype=np.float64)
+    source = np.asarray(dem)
+    if source.ndim != 2:
+        raise ValueError("DEM must be a two-dimensional raster.")
+    if chunk_rows < 1:
+        raise ValueError("chunk_rows must be at least 1.")
 
-    height, width = dem.shape
-    roughness = np.full(dem.shape, np.nan, dtype=np.float64)
-
+    height, width = source.shape
+    roughness = np.full(source.shape, np.nan, dtype=np.float32)
     if height < 3 or width < 3:
         return roughness
 
-    windows = sliding_window_view(dem, (3, 3))
-
-    # Yalnızca dokuz pikselin tamamı geçerli olan pencereler
-    valid = np.all(np.isfinite(windows), axis=(-2, -1))
-
-    # Pencere ortalaması
-    mean_z = np.mean(windows, axis=(-2, -1))
-
-    # Yüksekliklerin karelerinin ortalaması
-    mean_z2 = np.mean(windows ** 2, axis=(-2, -1))
-
-    # x yönündeki doğrusal değişim
-    sum_xz = (
-        np.sum(windows[:, :, :, 2], axis=2)
-        - np.sum(windows[:, :, :, 0], axis=2)
-    )
-
-    # y yönündeki doğrusal değişim
-    sum_yz = (
-        np.sum(windows[:, :, 2, :], axis=2)
-        - np.sum(windows[:, :, 0, :], axis=2)
-    )
-
-    # 3x3 pencerede sum(x²) = sum(y²) = 6
-    residual_variance = (
-        mean_z2
-        - mean_z ** 2
-        - (sum_xz ** 2) / 54.0
-        - (sum_yz ** 2) / 54.0
-    )
-
-    residual_variance = np.maximum(residual_variance, 0.0)
-
-    local_roughness = np.sqrt(residual_variance)
-
-    local_roughness[~valid] = np.nan
-
-    # Sonuçları orijinal DEM boyutuna yerleştir
-    roughness[1:-1, 1:-1] = local_roughness
+    # Bound the 3x3 window temporary even for unusually wide rasters.
+    max_window_values = 1_500_000
+    chunk_rows = max(1, min(int(chunk_rows), max_window_values // max(1, width * 9)))
+    for row_start in range(1, height - 1, chunk_rows):
+        row_stop = min(height - 1, row_start + chunk_rows)
+        # Two halo rows provide the complete 3x3 neighborhood at both ends.
+        block = np.asarray(source[row_start - 1:row_stop + 1], dtype=np.float64)
+        windows = sliding_window_view(block, (3, 3))
+        valid = np.all(np.isfinite(windows), axis=(-2, -1))
+        mean_z = np.mean(windows, axis=(-2, -1))
+        mean_z2 = np.mean(windows * windows, axis=(-2, -1))
+        sum_xz = np.sum(windows[:, :, :, 2], axis=2) - np.sum(windows[:, :, :, 0], axis=2)
+        sum_yz = np.sum(windows[:, :, 2, :], axis=2) - np.sum(windows[:, :, 0, :], axis=2)
+        residual_variance = (
+            mean_z2 - mean_z * mean_z
+            - (sum_xz * sum_xz) / 54.0
+            - (sum_yz * sum_yz) / 54.0
+        )
+        np.maximum(residual_variance, 0.0, out=residual_variance)
+        local_roughness = np.sqrt(residual_variance)
+        local_roughness[~valid] = np.nan
+        roughness[row_start:row_stop, 1:-1] = local_roughness.astype(np.float32, copy=False)
 
     return roughness
 

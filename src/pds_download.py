@@ -16,14 +16,37 @@ CHUNK_SIZE = 1024 * 1024
 USER_AGENT = "MarsBaseScout/0.2 (educational planetary-data viewer)"
 
 
+def allowed_data_hosts() -> set[str]:
+    """Allow PDS and explicitly configured public HTTPS data hosts."""
+    hosts = set(ALLOWED_PDS_HOSTS)
+    for entry in os.environ.get("MARS_DATA_ALLOWED_HOSTS", "").split(","):
+        host = entry.strip().lower().rstrip(".")
+        if not host or "://" in host or "/" in host or "*" in host:
+            continue
+        try:
+            import ipaddress
+            ipaddress.ip_address(host)
+        except ValueError:
+            labels = host.split(".")
+            valid_label = lambda label: (
+                bool(label)
+                and label[0].isalnum()
+                and label[-1].isalnum()
+                and all(character.isascii() and (character.isalnum() or character == "-") for character in label)
+            )
+            if len(labels) >= 2 and len(labels[-1]) >= 2 and labels[-1].isalpha() and all(valid_label(label) for label in labels):
+                hosts.add(host)
+    return hosts
+
+
 def _validated_img_url(url: str) -> str:
     value = (url or "").strip()
     parsed = urlsplit(value)
     if parsed.scheme != "https":
         raise ValueError("Güvenlik için yalnızca HTTPS PDS adresleri kabul ediliyor.")
-    if parsed.hostname not in ALLOWED_PDS_HOSTS:
+    if (parsed.hostname or "").lower().rstrip(".") not in allowed_data_hosts():
         raise ValueError(
-            "Şimdilik yalnızca pds-geosciences.wustl.edu arşivindeki doğrudan IMG bağlantıları destekleniyor."
+            "IMG URL must use PDS or a configured direct HTTPS data host."
         )
     if parsed.username or parsed.password or parsed.port not in (None, 443):
         raise ValueError("URL kimlik bilgisi veya standart dışı port içeremez.")
@@ -42,7 +65,7 @@ def _sibling_url(img_url: str, suffix: str) -> str:
 
 def _check_response(response: requests.Response, url: str) -> None:
     final = urlsplit(response.url)
-    if final.scheme != "https" or final.hostname not in ALLOWED_PDS_HOSTS:
+    if final.scheme != "https" or (final.hostname or "").lower().rstrip(".") not in allowed_data_hosts():
         raise ValueError("PDS sunucusu izin verilmeyen bir adrese yönlendirdi; indirme durduruldu.")
     if response.is_redirect:
         raise ValueError("PDS bağlantısı yönlendirme döndürdü. Tarayıcıdaki doğrudan HTTPS IMG adresini kullan.")
@@ -200,7 +223,7 @@ def download_pds_asset(url: str, allowed_extensions: tuple[str, ...], temp_dir: 
     """Stream a supported non-IMG PDS asset to a bounded temporary file."""
     value = (url or "").strip()
     parsed = urlsplit(value)
-    if parsed.scheme != "https" or parsed.hostname not in ALLOWED_PDS_HOSTS:
+    if parsed.scheme != "https" or (parsed.hostname or "").lower().rstrip(".") not in allowed_data_hosts():
         raise ValueError("Yaln\u0131zca yap\u0131land\u0131r\u0131lm\u0131\u015f PDS sunucusundaki do\u011frudan HTTPS dosyalar\u0131 destekleniyor.")
     if parsed.username or parsed.password or parsed.port not in (None, 443):
         raise ValueError("PDS URL\u2019leri kimlik bilgisi veya standart d\u0131\u015f\u0131 port i\u00e7ermemeli.")
