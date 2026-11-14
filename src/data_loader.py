@@ -1,8 +1,11 @@
 import re
+import math
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import rasterio
+from rasterio.windows import Window, from_bounds
 
 
 def _decode(data: bytes | bytearray | memoryview) -> str:
@@ -62,30 +65,76 @@ def _parse_map_info(text: str) -> dict[str, Any]:
         raise ValueError(
             "ENVI map info koordinatları okunamadı."
         ) from exc
+
 def _parse_projection_info(text: str) -> dict[str, Any]:
+    # Önce klasik ENVI projection info alanını kontrol et.
     match = re.search(
         r"(?im)^\s*projection\s+info\s*=\s*\{([^}]*)\}",
         text,
     )
 
-    if not match:
-        raise ValueError("ENVI projection info bulunamadı.")
+    if match:
+        parts = [part.strip() for part in match.group(1).split(",")]
 
-    parts = [part.strip() for part in match.group(1).split(",")]
+        if len(parts) < 4:
+            raise ValueError("ENVI projection info eksik.")
 
-    if len(parts) < 4:
-        raise ValueError("ENVI projection info eksik.")
+        try:
+            return {
+                "projection_code": int(parts[0]),
+                "semi_major_axis": float(parts[1]),
+                "central_meridian": float(parts[3]),
+            }
+        except ValueError as exc:
+            raise ValueError(
+                "Projeksiyon parametreleri okunamadı."
+            ) from exc
 
-    try:
-        return {
-            "projection_code": int(parts[0]),
-            "semi_major_axis": float(parts[1]),
-            "central_meridian": float(parts[3]),
-        }
-    except ValueError as exc:
+    # ENVI projection info yoksa coordinate system string alanını oku.
+    coord_match = re.search(
+        r'(?im)^\s*coordinate\s+system\s+string\s*=\s*\{(.*?)\}\s*$',
+        text,
+    )
+
+    if not coord_match:
         raise ValueError(
-            "Projeksiyon parametreleri okunamadı."
-        ) from exc
+            "ENVI projection info veya coordinate system string bulunamadı."
+        )
+
+    coordinate_text = coord_match.group(1)
+
+    radius_match = re.search(
+        r'SPHEROID\s*\[\s*"[^"]+"\s*,\s*([-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?)',
+        coordinate_text,
+        re.IGNORECASE,
+    )
+
+    if not radius_match:
+        raise ValueError("Mars referans yarıçapı bulunamadı.")
+
+    radius = float(radius_match.group(1))
+
+    if radius <= 0:
+        raise ValueError("Mars referans yarıçapı geçersiz.")
+
+    meridian_match = re.search(
+        r'PRIMEM\s*\[\s*"[^"]+"\s*,\s*([-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?)',
+        coordinate_text,
+        re.IGNORECASE,
+    )
+
+    central_meridian = (
+        float(meridian_match.group(1))
+        if meridian_match
+        else 0.0
+    )
+
+    return {
+        "projection_code": 0,
+        "semi_major_axis": radius,
+        "central_meridian": central_meridian,
+    }
+
 
 def parse_envi_header(hdr_bytes: bytes | bytearray | memoryview) -> dict[str, Any]:
     """Parse the small ENVI header and return raster layout information."""
@@ -158,7 +207,8 @@ def _parse_pds_label(lbl_bytes: bytes | bytearray | memoryview | None) -> dict[s
             "scaling_factor": 1.0,
             "offset": 0.0,
             "missing_constant": None,
-            "unit": "etikette belirtilmemiş",
+            "unit": "METER",
+            "unit_source": "MOLA MEGDR ürün metadata bilgisi",
             "sample_type": None,
             "sample_bits": None,
             "line_samples": None,
@@ -166,29 +216,62 @@ def _parse_pds_label(lbl_bytes: bytes | bytearray | memoryview | None) -> dict[s
         }
 
     text = _decode(lbl_bytes)
-    unit = _label_text_value(text, "UNIT") or _label_text_value(text, "UNITS")
-    unit = unit.upper() if unit else "etikette belirtilmemiş"
+
+    unit = (
+        _label_text_value(text, "UNIT")
+        or _label_text_value(text, "UNITS")
+    )
+
+    if unit:
+        unit = unit.upper()
+        unit_source = "PDS LBL dosyası"
+    else:
+        unit = "METER"
+        unit_source = "MOLA MEGDR ürün metadata bilgisi"
+
     missing_raw = _label_text_value(text, "MISSING_CONSTANT")
+
     try:
-        missing_constant = float(missing_raw) if missing_raw is not None else None
+        missing_constant = (
+            float(missing_raw)
+            if missing_raw is not None
+            else None
+        )
     except ValueError:
         missing_constant = None
 
     bits_raw = _label_text_value(text, "SAMPLE_BITS")
     samples_raw = _label_text_value(text, "LINE_SAMPLES")
     lines_raw = _label_text_value(text, "LINES")
+
     return {
         "present": True,
-        "scaling_factor": _numeric_label_value(text, "SCALING_FACTOR", 1.0),
-        "offset": _numeric_label_value(text, "OFFSET", 0.0),
+        "scaling_factor": _numeric_label_value(
+            text, "SCALING_FACTOR", 1.0
+        ),
+        "offset": _numeric_label_value(
+            text, "OFFSET", 0.0
+        ),
         "missing_constant": missing_constant,
         "unit": unit,
+        "unit_source": unit_source,
         "sample_type": _label_text_value(text, "SAMPLE_TYPE"),
-        "sample_bits": int(bits_raw) if bits_raw and bits_raw.isdigit() else None,
-        "line_samples": int(samples_raw) if samples_raw and samples_raw.isdigit() else None,
-        "lines": int(lines_raw) if lines_raw and lines_raw.isdigit() else None,
+        "sample_bits": (
+            int(bits_raw)
+            if bits_raw and bits_raw.isdigit()
+            else None
+        ),
+        "line_samples": (
+            int(samples_raw)
+            if samples_raw and samples_raw.isdigit()
+            else None
+        ),
+        "lines": (
+            int(lines_raw)
+            if lines_raw and lines_raw.isdigit()
+            else None
+        ),
     }
-
 
 def _make_metadata(header: dict[str, Any], label: dict[str, Any], file_size: int) -> dict[str, Any]:
     if label["line_samples"] and label["line_samples"] != header["samples"]:
@@ -205,10 +288,100 @@ def _make_metadata(header: dict[str, Any], label: dict[str, Any], file_size: int
         "scale_factor": label["scaling_factor"],
         "offset": label["offset"],
         "height_unit": label["unit"],
+        "vertical_scale_to_m": 1.0 if label["unit"].upper() in (
+    "M", "METER", "METERS", "METRE", "METRES"
+) else None,
+
+"height_unit_source": label.get(
+    "unit_source",
+    "PDS LBL dosyası",
+),
         "nodata": nodata,
         "label_metadata": label,
         "file_size_bytes": int(file_size),
     }
+
+
+def load_geotiff_dem_from_path(path: str | Path):
+    """Load a single-band geographic Mars DEM from a standard GeoTIFF."""
+    from src.study_area import DEFAULT_STUDY_AREA_VERTICES
+
+    with rasterio.open(path) as src:
+        if src.count != 1:
+            raise ValueError("GeoTIFF DEM tek bantlı olmalı.")
+        if src.crs is None or not src.crs.is_geographic:
+            raise ValueError("GeoTIFF CRS'i coğrafi enlem-boylam (Mars) olmalı.")
+        transform = src.transform
+        if not np.isclose(transform.b, 0) or not np.isclose(transform.d, 0):
+            raise ValueError("Döndürülmüş GeoTIFF gridleri henüz desteklenmiyor.")
+        if transform.a <= 0 or transform.e >= 0:
+            raise ValueError("GeoTIFF kuzey-yukarı grid yönünde olmalı (boylam sağa, enlem yukarı artar).")
+        unit = str(src.units[0] or src.tags().get("units", "")).strip()
+        if not unit:
+            raise ValueError("DEM yükseklik birimi GeoTIFF metadata içinde belirtilmeli.")
+        vertices = []
+        for longitude, latitude in DEFAULT_STUDY_AREA_VERTICES:
+            longitude = (float(longitude) + 180.0) % 360.0 - 180.0
+            if src.bounds.left >= 0 and src.bounds.right > 180:
+                longitude %= 360.0
+            vertices.append((longitude, float(latitude)))
+        base_window = from_bounds(
+            min(point[0] for point in vertices),
+            min(point[1] for point in vertices),
+            max(point[0] for point in vertices),
+            max(point[1] for point in vertices),
+            src.transform,
+        )
+        triangle_covered = not (
+            base_window.col_off < 0 or base_window.row_off < 0
+            or base_window.col_off + base_window.width > src.width
+            or base_window.row_off + base_window.height > src.height
+        )
+        if triangle_covered:
+            pad_x = math.ceil(base_window.width * 0.2)
+            pad_y = math.ceil(base_window.height * 0.2)
+            col0 = max(0, math.floor(base_window.col_off) - pad_x)
+            row0 = max(0, math.floor(base_window.row_off) - pad_y)
+            col1 = min(src.width, math.ceil(base_window.col_off + base_window.width) + pad_x)
+            row1 = min(src.height, math.ceil(base_window.row_off + base_window.height) + pad_y)
+            window = Window(col0, row0, col1 - col0, row1 - row0)
+        else:
+            # A regional alternate DEM may cover a different candidate area.
+            window = Window(0, 0, src.width, src.height)
+        data = src.read(1, window=window, masked=True).astype(np.float32).filled(np.nan)
+        data = data * float(src.scales[0]) + float(src.offsets[0])
+        data[~np.isfinite(data)] = np.nan
+        transform = src.window_transform(window)
+        radius = 3_396_190.0
+        metadata = {
+            "samples": data.shape[1], "lines": data.shape[0], "bands": 1,
+            "dtype_name": src.dtypes[0], "data_type": src.dtypes[0],
+            "byte_order": "GeoTIFF", "header_offset": 0,
+            "projection_name": "Geographic Lat/Lon",
+            "map_units": "degrees", "semi_major_axis": radius,
+            "central_meridian": float(transform.c + transform.a * 0.5),
+            "map_reference_col": 1.0, "map_reference_row": 1.0,
+            "map_x": float(transform.c + transform.a * 0.5),
+            "map_y": float(transform.f + transform.e * 0.5),
+            "pixel_x": abs(float(transform.a)),
+            "pixel_y": abs(float(transform.e)),
+            "map_info_raw": str(transform), "nodata": np.nan,
+            "scale_factor": 1.0, "offset": 0.0,
+            "height_unit": unit,
+            "vertical_scale_to_m": {
+                "m": 1.0, "meter": 1.0, "meters": 1.0,
+                "metre": 1.0, "metres": 1.0, "km": 1000.0,
+                "ft": 0.3048, "feet": 0.3048,
+            }.get(unit.lower()),
+            "label_metadata": {"crs": str(src.crs), "source": "GeoTIFF"},
+            "file_size_bytes": Path(path).stat().st_size,
+            "source_mode": "GeoTIFF yüklemesi",
+        }
+    if metadata["vertical_scale_to_m"] is None:
+        raise ValueError(f"GeoTIFF yükseklik birimi desteklenmiyor: {unit}")
+    if data.shape[0] < 2 or data.shape[1] < 2 or not np.any(np.isfinite(data)):
+        raise ValueError("GeoTIFF rasterında yeterli geçerli yükseklik verisi yok.")
+    return data, metadata
 
 
 def load_mola_envi(

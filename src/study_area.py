@@ -1,6 +1,5 @@
 from __future__ import annotations
-
-import re
+import math
 
 import numpy as np
 
@@ -9,29 +8,67 @@ import numpy as np
 # Koordinat sırası: (Doğu boylamı, kuzey enlemi)
 # Boylam sistemi: 0-360 derece.
 DEFAULT_STUDY_AREA_VERTICES = [
-    (223.563, 26.797),  # A
-    (221.563, 25.788),  # B
-    (217.781, 22.317),  # C
+    (223.563, 23.8435),  # A
+    (221.563, 25.788),   # B
+    (217.781, 22.317),   # C
 ]
+# Global haritanın merkez orijinli piksel koordinatları.
+# X: -180000 ... +180000
+# Y:  -90000 ...  +90000
+
+STUDY_AREA_PIXELS = [
+    (-138488, 25820),  # A
+    (-141165, 23100),  # B
+    (-137595, 20890),  # C
+    (-135341, 23500),  # D
+]
+DEFAULT_OUTER_AREA_PIXELS = [
+    (-142219, 26797),
+    (-135341, 26797),
+    (-135341, 20890),
+    (-142219, 20890),
+]
+def centered_to_raster_pixel(x, y):
+    col = x + 180000
+    row = 90000 - y
+    return row, col
 
 
 def parse_geographic_map_info(metadata: dict) -> dict:
-    projection = metadata.get("projection_name", "")
+    projection = str(metadata.get("projection_name", "")).lower()
+    units = str(metadata.get("map_units") or "").lower()
 
-    if "equirectangular" not in projection.lower():
+    is_equirectangular = "equirectangular" in projection
+    is_geographic = (
+        "geographic lat/lon" in projection
+        or "geographic" in projection
+    )
+
+    if not (is_equirectangular or is_geographic):
         raise ValueError(
-            f"Desteklenmeyen projeksiyon: {projection}"
+            f"Desteklenmeyen projeksiyon: {metadata.get('projection_name')}"
         )
 
-    if metadata.get("map_units", "").lower() != "meters":
+    if is_equirectangular and units != "meters":
         raise ValueError(
-            "Bu dönüşüm yalnızca metre birimli rasterları destekliyor."
+            "Equirectangular raster metre birimli olmalı."
+        )
+
+    if is_geographic and units not in ("", "degrees", "degree"):
+        raise ValueError(
+            f"Geographic Lat/Lon için beklenmeyen birim: {units}"
         )
 
     radius = float(metadata["semi_major_axis"])
 
     if radius <= 0:
         raise ValueError("Mars referans yarıçapı geçersiz.")
+
+    pixel_x = float(metadata["pixel_x"])
+    pixel_y = float(metadata["pixel_y"])
+
+    if pixel_x <= 0 or pixel_y <= 0:
+        raise ValueError("Piksel boyutları geçersiz.")
 
     return {
         "radius": radius,
@@ -40,36 +77,45 @@ def parse_geographic_map_info(metadata: dict) -> dict:
         "reference_row": float(metadata["map_reference_row"]),
         "map_x": float(metadata["map_x"]),
         "map_y": float(metadata["map_y"]),
-        "pixel_x": float(metadata["pixel_x"]),
-        "pixel_y": float(metadata["pixel_y"]),
+        "pixel_x": pixel_x,
+        "pixel_y": pixel_y,
+        "coordinate_units": "degrees" if is_geographic else "meters",
     }
 
 
-def geographic_to_pixel(
-    longitude: float,
-    latitude: float,
-    map_info: dict,
-) -> tuple[float, float]:
 
-    radius = map_info["radius"]
-    central_meridian = map_info["central_meridian"]
 
-    delta_lon = longitude - central_meridian
+def geographic_to_pixel(longitude, latitude, map_info):
+    longitude = float(longitude)
+    latitude = float(latitude)
 
-    # Boylam farkını [-180, 180) aralığına getir.
-    delta_lon = (delta_lon + 180.0) % 360.0 - 180.0
+    central_meridian = float(map_info["central_meridian"])
 
-    x = radius * np.radians(delta_lon)
-    y = radius * np.radians(latitude)
+    delta_lon = (
+        longitude - central_meridian + 180.0
+    ) % 360.0 - 180.0
+
+    is_geographic = map_info.get("coordinate_units") == "degrees"
+
+    if is_geographic:
+        # Geographic Lat/Lon: koordinatlar doğrudan derecedir.
+        x = central_meridian + delta_lon
+        y = latitude
+
+    else:
+        # Equirectangular: koordinatları metreye dönüştür.
+        radius = float(map_info["radius"])
+        x = radius * math.radians(delta_lon)
+        y = radius * math.radians(latitude)
 
     col = (
-        map_info["reference_col"] - 1
-        + (x - map_info["map_x"]) / map_info["pixel_x"]
+        float(map_info["reference_col"]) - 1
+        + (x - float(map_info["map_x"])) / float(map_info["pixel_x"])
     )
 
     row = (
-        map_info["reference_row"] - 1
-        - (y - map_info["map_y"]) / map_info["pixel_y"]
+        float(map_info["reference_row"]) - 1
+        - (y - float(map_info["map_y"])) / float(map_info["pixel_y"])
     )
 
     return row, col
@@ -170,7 +216,20 @@ def extract_study_area(
             "Üçgenin bir veya daha fazla köşesi MOLA rasterının "
             "dışında. Koordinatları ve raster kapsamını kontrol et."
         )
+    # Üçgenin çevresinde boşluk bırakmak için DEM penceresini genişlet.
+    padding_ratio = 0.20
 
+    triangle_height = row_stop - row_start
+    triangle_width = col_stop - col_start
+
+    padding_y = int(np.ceil(triangle_height * padding_ratio))
+    padding_x = int(np.ceil(triangle_width * padding_ratio))
+
+    row_start = max(0, row_start - padding_y)
+    row_stop = min(rows_count, row_stop + padding_y)
+
+    col_start = max(0, col_start - padding_x)
+    col_stop = min(cols_count, col_stop + padding_x)
     # Yalnızca üçgenin çevresindeki dikdörtgen pencere okunur.
     raw_window = dem[
         row_start:row_stop,
@@ -181,37 +240,58 @@ def extract_study_area(
     rows = np.arange(row_start, row_stop)
     cols = np.arange(col_start, col_stop)
 
-    x_values = (
-    map_info["map_x"]
-    + (
-        cols - (map_info["reference_col"] - 1)
-    ) * map_info["pixel_x"]
-)
+    if map_info["coordinate_units"] == "degrees":
 
-    y_values = (
-    map_info["map_y"]
-    + (
-        map_info["reference_row"] - 1 - rows
-    ) * map_info["pixel_y"]
-)
+        lon_values = (
+            map_info["map_x"]
+            + (cols - (map_info["reference_col"] - 1))
+            * map_info["pixel_x"]
+        )
 
-    lon_values = (
-    map_info["central_meridian"]
-    + np.degrees(x_values / map_info["radius"])
-)
+        lat_values = (
+            map_info["map_y"]
+            - (rows - (map_info["reference_row"] - 1))
+            * map_info["pixel_y"]
+        )
 
-    lat_values = np.degrees(y_values / map_info["radius"])
+        lon_values = (lon_values + 180.0) % 360.0 - 180.0
 
-    lon_grid, lat_grid = np.meshgrid(
-        lon_values,
-        lat_values,
-    )
+    else:
 
-    # Üçgen içerisinde kalan pikseller.
+        x_values = (
+            map_info["map_x"]
+            + (cols - (map_info["reference_col"] - 1))
+            * map_info["pixel_x"]
+        )
+
+        y_values = (
+            map_info["map_y"]
+            + (map_info["reference_row"] - 1 - rows)
+            * map_info["pixel_y"]
+        )
+
+        lon_values = (
+            map_info["central_meridian"]
+            + np.degrees(x_values / map_info["radius"])
+        )
+
+        lat_values = np.degrees(
+            y_values / map_info["radius"]
+        )
+
+        lon_values = (lon_values + 180.0) % 360.0 - 180.0
+
+    lon_grid, lat_grid = np.meshgrid(lon_values, lat_values)
+
+    polygon_vertices = [
+        ((lon + 180.0) % 360.0 - 180.0, lat)
+        for lon, lat in vertices
+    ]
+
     polygon_mask = point_in_polygon(
         lon_grid,
         lat_grid,
-        vertices,
+        polygon_vertices,
     )
 
     # NoData ve geçersiz sayısal değerleri ayıkla.
@@ -231,12 +311,17 @@ def extract_study_area(
     scale = float(metadata.get("scale_factor", 1.0))
     offset = float(metadata.get("offset", 0.0))
 
-    elevation = raw_window.astype(np.float32)
+        # Arka plan: Üçgen çevresindeki bütün geçerli DEM verileri.
+    background_elevation = raw_window.astype(np.float32)
 
-    elevation *= scale
-    elevation += offset
+    background_elevation *= scale
+    background_elevation += offset
 
-    elevation[~final_mask] = np.nan
+    background_elevation[~valid_mask] = np.nan
+
+    # Analiz: Yalnızca üçgen içindeki geçerli DEM verileri.
+    elevation = background_elevation.copy()
+    elevation[~polygon_mask] = np.nan
 
     valid_elevations = elevation[final_mask]
 
@@ -272,4 +357,5 @@ def extract_study_area(
         "mean_elevation": float(np.mean(valid_elevations)),
         "median_elevation": float(np.median(valid_elevations)),
         "map_info": map_info,
+        "background_elevation": background_elevation,
     }

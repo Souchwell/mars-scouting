@@ -50,6 +50,7 @@ def _check_response(response: requests.Response, url: str) -> None:
         raise ValueError(f"PDS sunucusu HTTP {response.status_code} yanıtı verdi: {url}")
 
 
+
 def _download_small_file(url: str, optional: bool = False) -> bytes | None:
     try:
         with requests.get(
@@ -59,27 +60,56 @@ def _download_small_file(url: str, optional: bool = False) -> bytes | None:
             allow_redirects=False,
             headers={"User-Agent": USER_AGENT},
         ) as response:
-            if optional and response.status_code == 404:
+
+            # İsteğe bağlı dosya bulunamazsa veya erişilemezse devam et.
+            if optional and response.status_code != 200:
                 return None
+
             _check_response(response, url)
+
             length = response.headers.get("Content-Length")
+
             if length and int(length) > MAX_METADATA_BYTES:
-                raise ValueError("HDR/LBL metadata dosyası beklenenden büyük; indirme reddedildi.")
+                if optional:
+                    return None
+                raise ValueError(
+                    "HDR metadata dosyası beklenenden büyük; indirme reddedildi."
+                )
+
             chunks = []
             total = 0
+
             for chunk in response.iter_content(chunk_size=64 * 1024):
                 if not chunk:
                     continue
-                total += len(chunk)
-                if total > MAX_METADATA_BYTES:
-                    raise ValueError("HDR/LBL metadata dosyası 5 MiB sınırını aşıyor.")
-                chunks.append(chunk)
-            if not chunks:
-                raise ValueError("PDS metadata dosyası boş döndü.")
-            return b"".join(chunks)
-    except requests.RequestException as exc:
-        raise RuntimeError(f"PDS metadata dosyası indirilemedi: {exc}") from exc
 
+                total += len(chunk)
+
+                if total > MAX_METADATA_BYTES:
+                    if optional:
+                        return None
+
+                    raise ValueError(
+                        "HDR metadata dosyası 5 MiB sınırını aşıyor."
+                    )
+
+                chunks.append(chunk)
+
+            if not chunks:
+                if optional:
+                    return None
+
+                raise ValueError("PDS HDR metadata dosyası boş döndü.")
+
+            return b"".join(chunks)
+
+    except requests.RequestException as exc:
+        if optional:
+            return None
+
+        raise RuntimeError(
+            f"PDS metadata dosyası indirilemedi: {exc}"
+        ) from exc
 
 def download_pds_product(
     img_url: str,
@@ -153,6 +183,71 @@ def download_pds_product(
     except Exception:
         try:
             os.remove(img_path)
+        except OSError:
+            pass
+        raise
+
+
+PDS_ASSET_LIMITS = {
+    ".tif": 500 * 1024 * 1024,
+    ".tiff": 500 * 1024 * 1024,
+    ".nc": 140 * 1024 * 1024,
+    ".txt": 20 * 1024 * 1024,
+}
+
+
+def download_pds_asset(url: str, allowed_extensions: tuple[str, ...], temp_dir: str | None = None) -> tuple[str, str]:
+    """Stream a supported non-IMG PDS asset to a bounded temporary file."""
+    value = (url or "").strip()
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or parsed.hostname not in ALLOWED_PDS_HOSTS:
+        raise ValueError("Yaln\u0131zca yap\u0131land\u0131r\u0131lm\u0131\u015f PDS sunucusundaki do\u011frudan HTTPS dosyalar\u0131 destekleniyor.")
+    if parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise ValueError("PDS URL\u2019leri kimlik bilgisi veya standart d\u0131\u015f\u0131 port i\u00e7ermemeli.")
+    if parsed.query or parsed.fragment:
+        raise ValueError("PDS dosya URL\u2019lerinde sorgu parametresi veya par\u00e7a bulunmamal\u0131.")
+    suffix = Path(parsed.path).suffix.lower()
+    if suffix not in allowed_extensions or suffix not in PDS_ASSET_LIMITS:
+        raise ValueError(f"Do\u011frudan PDS dosyas\u0131 i\u00e7in desteklenen uzant\u0131lardan birini se\u00e7in: {', '.join(allowed_extensions)}.")
+
+    normalized_url = value
+    limit = PDS_ASSET_LIMITS[suffix]
+    fd, asset_path = tempfile.mkstemp(prefix="mars_pds_", suffix=suffix, dir=temp_dir)
+    downloaded = 0
+    try:
+        with os.fdopen(fd, "wb") as output:
+            with requests.get(
+                normalized_url,
+                stream=True,
+                timeout=(20, 90),
+                allow_redirects=False,
+                headers={"User-Agent": USER_AGENT},
+            ) as response:
+                _check_response(response, normalized_url)
+                if "text/html" in response.headers.get("Content-Type", "").lower():
+                    raise ValueError("PDS URL veri dosyas\u0131 yerine HTML sayfas\u0131 d\u00f6nd\u00fcrd\u00fc.")
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > limit:
+                    raise ValueError(f"PDS dosyas\u0131 beklenen boyut s\u0131n\u0131r\u0131n\u0131 a\u015f\u0131yor: {limit // (1024 * 1024)} MiB indirme s\u0131n\u0131r\u0131.")
+                for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+                    if not chunk:
+                        continue
+                    downloaded += len(chunk)
+                    if downloaded > limit:
+                        raise ValueError(f"PDS dosyas\u0131 beklenen boyut s\u0131n\u0131r\u0131n\u0131 a\u015f\u0131yor: {limit // (1024 * 1024)} MiB indirme s\u0131n\u0131r\u0131.")
+                    output.write(chunk)
+        if downloaded == 0:
+            raise ValueError("PDS veri dosyas\u0131 bo\u015f geldi.")
+        return asset_path, normalized_url
+    except requests.RequestException as exc:
+        try:
+            os.remove(asset_path)
+        except OSError:
+            pass
+        raise RuntimeError(f"PDS veri dosyas\u0131 indirilemedi: {exc}") from exc
+    except Exception:
+        try:
+            os.remove(asset_path)
         except OSError:
             pass
         raise
