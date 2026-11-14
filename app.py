@@ -551,7 +551,7 @@ if source_mode == "pds":
     }
     st.subheader("PDS ar\u015fiv verileri")
     st.write("Desteklenen verilerin do\u011frudan HTTPS URL adreslerini girin. ENVI IMG adresi e\u015fle\u015fen HDR dosyas\u0131n\u0131 ve iste\u011fe ba\u011fl\u0131 LBL dosyas\u0131n\u0131 da al\u0131r.")
-    st.caption("PDS d\u0131\u015f\u0131 bir HTTPS alan ad\u0131 i\u00e7in Render ortam\u0131nda MARS_DATA_ALLOWED_HOSTS de\u011fi\u015fkenini ayarlay\u0131n.")
+    st.caption("PDS ve herkese a\u00e7\u0131k GitHub Release indirme adresleri desteklenir. Ba\u015fka bir HTTPS sunucusu i\u00e7in MARS_DATA_ALLOWED_HOSTS ayar\u0131n\u0131 yap\u0131n.")
     url_count = int(st.session_state.get("pds_url_count", 1))
     if st.button("Daha fazla URL ekle", key="add_pds_url"):
         st.session_state["pds_url_count"] = url_count + 1

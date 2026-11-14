@@ -3,13 +3,20 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
 
 from src.data_loader import parse_envi_header
 
 ALLOWED_PDS_HOSTS = {"pds-geosciences.wustl.edu"}
+GITHUB_RELEASE_HOSTS = {
+    "github.com",
+    "release-assets.githubusercontent.com",
+    "objects.githubusercontent.com",
+    "github-production-release-asset-2e65be.s3.amazonaws.com",
+}
+GITHUB_RELEASE_CDN_HOSTS = GITHUB_RELEASE_HOSTS - {"github.com"}
 MAX_IMG_BYTES = 350 * 1024 * 1024  # allow MEG128, reject unexpectedly huge downloads
 MAX_METADATA_BYTES = 5 * 1024 * 1024
 CHUNK_SIZE = 1024 * 1024
@@ -17,8 +24,8 @@ USER_AGENT = "MarsBaseScout/0.2 (educational planetary-data viewer)"
 
 
 def allowed_data_hosts() -> set[str]:
-    """Allow PDS and explicitly configured public HTTPS data hosts."""
-    hosts = set(ALLOWED_PDS_HOSTS)
+    """Allow PDS, GitHub Releases, and explicitly configured HTTPS hosts."""
+    hosts = set(ALLOWED_PDS_HOSTS | GITHUB_RELEASE_HOSTS)
     for entry in os.environ.get("MARS_DATA_ALLOWED_HOSTS", "").split(","):
         host = entry.strip().lower().rstrip(".")
         if not host or "://" in host or "/" in host or "*" in host:
@@ -37,6 +44,41 @@ def allowed_data_hosts() -> set[str]:
             if len(labels) >= 2 and len(labels[-1]) >= 2 and labels[-1].isalpha() and all(valid_label(label) for label in labels):
                 hosts.add(host)
     return hosts
+
+
+def _request_file_response(url: str, **kwargs) -> requests.Response:
+    """Request a file, following only the known CDN redirects used by GitHub Releases."""
+    current_url = url
+    source = urlsplit(url)
+    github_release = (
+        (source.hostname or "").lower().rstrip(".") == "github.com"
+        and "/releases/download/" in source.path
+    )
+
+    for _ in range(6):
+        response = requests.get(current_url, allow_redirects=False, **kwargs)
+        if not response.is_redirect:
+            return response
+
+        location = response.headers.get("Location")
+        response.close()
+        if not github_release or not location:
+            raise ValueError("Only GitHub Release asset redirects are supported.")
+
+        next_url = urljoin(current_url, location)
+        target = urlsplit(next_url)
+        target_host = (target.hostname or "").lower().rstrip(".")
+        if (
+            target.scheme != "https"
+            or target_host not in GITHUB_RELEASE_CDN_HOSTS
+            or target.username
+            or target.password
+            or target.port not in (None, 443)
+        ):
+            raise ValueError("GitHub Release redirected to an untrusted download host.")
+        current_url = next_url
+
+    raise ValueError("GitHub Release used too many redirects.")
 
 
 def _validated_img_url(url: str) -> str:
@@ -76,11 +118,10 @@ def _check_response(response: requests.Response, url: str) -> None:
 
 def _download_small_file(url: str, optional: bool = False) -> bytes | None:
     try:
-        with requests.get(
+        with _request_file_response(
             url,
             stream=True,
             timeout=(15, 45),
-            allow_redirects=False,
             headers={"User-Agent": USER_AGENT},
         ) as response:
 
@@ -167,11 +208,10 @@ def download_pds_product(
     downloaded = 0
     try:
         with os.fdopen(fd, "wb") as output:
-            with requests.get(
+            with _request_file_response(
                 img_url,
                 stream=True,
                 timeout=(20, 90),
-                allow_redirects=False,
                 headers={"User-Agent": USER_AGENT},
             ) as response:
                 _check_response(response, img_url)
@@ -239,11 +279,10 @@ def download_pds_asset(url: str, allowed_extensions: tuple[str, ...], temp_dir: 
     downloaded = 0
     try:
         with os.fdopen(fd, "wb") as output:
-            with requests.get(
+            with _request_file_response(
                 normalized_url,
                 stream=True,
                 timeout=(20, 90),
-                allow_redirects=False,
                 headers={"User-Agent": USER_AGENT},
             ) as response:
                 _check_response(response, normalized_url)

@@ -308,8 +308,8 @@ _EN.update({
 
 
 _EN.update({
-    'Desteklenen verilerin do?rudan HTTPS URL adreslerini girin. ENVI IMG adresi e?le?en HDR dosyas?n? ve iste?e ba?l? LBL dosyas?n? da al?r.': 'Enter direct HTTPS URLs for supported data. ENVI IMG URLs also fetch the matching HDR and optional LBL files.',
-    'PDS d??? bir HTTPS alan ad? i?in Render ortam?nda MARS_DATA_ALLOWED_HOSTS de?i?kenini ayarlay?n.': 'For a non-PDS HTTPS host, set MARS_DATA_ALLOWED_HOSTS in the Render environment.',
+    "Desteklenen verilerin do\u011frudan HTTPS URL adreslerini girin. ENVI IMG adresi e\u015fle\u015fen HDR dosyas\u0131n\u0131 ve iste\u011fe ba\u011fl\u0131 LBL dosyas\u0131n\u0131 da al\u0131r.": 'Enter direct HTTPS URLs for supported data. ENVI IMG URLs also fetch the matching HDR and optional LBL files.',
+    "PDS ve herkese a\u00e7\u0131k GitHub Release indirme adresleri desteklenir. Ba\u015fka bir HTTPS sunucusu i\u00e7in MARS_DATA_ALLOWED_HOSTS ayar\u0131n\u0131 yap\u0131n.": 'PDS and public GitHub Release download URLs are supported. For other HTTPS hosts, configure MARS_DATA_ALLOWED_HOSTS.',
 })
 
 def translate(value, language="tr"):

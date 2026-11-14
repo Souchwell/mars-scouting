@@ -23,7 +23,7 @@ Uygulamada **Proje verileri** bölümünden DEM ve atmosfer dosyaları tek sefer
 | EMARS atmosferi | `.nc` | NetCDF; atmosfer değişkenleri ve koordinatları tanınabilir olmalı |
 | MCD atmosferi | `.txt` | MCD metin çıktısı; sıcaklık katmanları desteklenir |
 
-PDS ekranında her dosyanın doğrudan HTTPS indirme adresini girip dosya türünü seçin. İçerik dönüştürülmeden indirilir; `.img` dosyasının `.hdr` dosyası aynı klasörde ve aynı temel adda olmalıdır. Varsayılan izinli sunucu `pds-geosciences.wustl.edu` alan adıdır. Başka bir herkese açık dosya sunucusuna izin vermek için Render ortam değişkeni `MARS_DATA_ALLOWED_HOSTS` içine tam alan adını yazın; birden fazla alan adını virgülle ayırın. Protokol ve yol eklemeyin. URL doğrudan dosyaya gitmeli; yönlendirme ve sorgu parametreleri kabul edilmez.
+PDS arşiv URL'leri ve herkese açık GitHub Release indirme bağlantıları desteklenir. GitHub Release dosyaları için her dosyanın indirme URL'sini kullanın; uygulama yalnızca GitHub'ın bilinen dosya CDN'lerine giden HTTPS yönlendirmelerini izler. İçerik dönüştürülmeden indirilir; `.img` dosyasının `.hdr` dosyası aynı Release içinde aynı temel adla bulunmalıdır. Başka bir herkese açık dosya sunucusuna izin vermek için Render ortam değişkeni `MARS_DATA_ALLOWED_HOSTS` içine tam alan adını yazın; birden fazla alan adını virgülle ayırın. Protokol ve yol eklemeyin. Bilinmeyen sunuculara yönlendirmeler reddedilir.
 
 URL kullanmak tarayıcıdan uygulamaya dosya yükleme gereğini kaldırır, ancak analiz yine sunucu belleğini ve işlemcisini kullanır. ENVI rasterı bellek eşlemeli açılır; yerel pürüzlülük hesabı ara belleği satır bloklarıyla sınırlar. Büyük GeoTIFF ve NetCDF dosyaları, özellikle 512 MB bellekli servislerde, yine de kaynak sınırına ulaşabilir.
 
@@ -47,4 +47,4 @@ py -m venv .venv
 
 `render.yaml`, deponun kök dizinindedir. Render Blueprint'i bu dosyadan oluşturduğunuzda uygulama depo kökünden kurulur ve başlatılır. Servis geçici disk kullanır; yeniden başlatma sonrasında PDS dosyalarının yeniden indirilmesi gerekir.
 
-`.streamlit/config.toml` dosyası yükleme boyutunu 150 MiB ile sınırlar. PDS URL indirmelerinde desteklenen biçime göre uygulama düzeyinde dosya boyutu sınırları uygulanır. PDS indirmeleri yalnızca yapılandırılmış HTTPS alan adlarını kabul eder; IP adresleri, yönlendirmeler, sorgu parametreleri ve desteklenmeyen uzantılar reddedilir.
+`.streamlit/config.toml` dosyası yükleme boyutunu 150 MiB ile sınırlar. URL indirmelerinde desteklenen biçime göre uygulama düzeyinde dosya boyutu sınırları uygulanır. İndirmeler yalnızca izinli HTTPS sunucularını kabul eder; IP adresleri, bilinmeyen sunuculara yönlendirmeler, sorgu parametreleri ve desteklenmeyen uzantılar reddedilir.
