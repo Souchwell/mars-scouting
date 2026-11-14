@@ -308,8 +308,11 @@ _EN.update({
 
 
 _EN.update({
-    "Desteklenen verilerin do\u011frudan HTTPS URL adreslerini girin. ENVI IMG adresi e\u015fle\u015fen HDR dosyas\u0131n\u0131 ve iste\u011fe ba\u011fl\u0131 LBL dosyas\u0131n\u0131 da al\u0131r.": 'Enter direct HTTPS URLs for supported data. ENVI IMG URLs also fetch the matching HDR and optional LBL files.',
-    "PDS ve herkese a\u00e7\u0131k GitHub Release indirme adresleri desteklenir. Ba\u015fka bir HTTPS sunucusu i\u00e7in MARS_DATA_ALLOWED_HOSTS ayar\u0131n\u0131 yap\u0131n.": 'PDS and public GitHub Release download URLs are supported. For other HTTPS hosts, configure MARS_DATA_ALLOWED_HOSTS.',
+    "Dosya indirme adreslerini a\u015fa\u011f\u0131ya yap\u0131\u015ft\u0131r\u0131n; dosya t\u00fcrleri URL uzant\u0131s\u0131ndan otomatik tan\u0131n\u0131r. IMG i\u00e7in e\u015fle\u015fen HDR dosyas\u0131 kendili\u011finden indirilir.": "Paste the download URLs below; file types are detected from their extensions. The matching HDR is fetched automatically for IMG.",
+    "Dosya URL'leri (her sat\u0131ra bir ba\u011flant\u0131)": "File URLs (one per line)",
+    "En az bir do\u011frudan .img, .tif, .tiff, .nc veya .txt dosya URL'si girin.": "Enter at least one direct .img, .tif, .tiff, .nc, or .txt file URL.",
+    "URL uzant\u0131s\u0131ndan dosya t\u00fcr\u00fc anla\u015f\u0131lamad\u0131 (": "Could not infer file type from URL extension (",
+    "PDS ve herkese a\u00e7\u0131k GitHub Release dosya adresleri desteklenir. GitHub'da Release sayfas\u0131n\u0131n de\u011fil, Assets alt\u0131ndaki dosyan\u0131n ba\u011flant\u0131s\u0131n\u0131 kopyalay\u0131n. Ba\u015fka bir HTTPS sunucusu i\u00e7in MARS_DATA_ALLOWED_HOSTS ayar\u0131n\u0131 yap\u0131n.": "PDS and public GitHub Release asset URLs are supported. Copy the asset link from the Assets section, not the Release page. Configure MARS_DATA_ALLOWED_HOSTS for other HTTPS hosts.",
 })
 
 def translate(value, language="tr"):

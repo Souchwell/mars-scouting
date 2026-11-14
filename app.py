@@ -6,6 +6,7 @@ import importlib
 import time
 
 from pathlib import Path
+from urllib.parse import urlsplit
 from src.emars_processing import (
     open_emars,
     get_time_information,
@@ -550,37 +551,46 @@ if source_mode == "pds":
         "txt": "MCD atmosfer verisi (.txt)",
     }
     st.subheader("PDS ar\u015fiv verileri")
-    st.write("Desteklenen verilerin do\u011frudan HTTPS URL adreslerini girin. ENVI IMG adresi e\u015fle\u015fen HDR dosyas\u0131n\u0131 ve iste\u011fe ba\u011fl\u0131 LBL dosyas\u0131n\u0131 da al\u0131r.")
-    st.caption("PDS ve herkese a\u00e7\u0131k GitHub Release indirme adresleri desteklenir. Ba\u015fka bir HTTPS sunucusu i\u00e7in MARS_DATA_ALLOWED_HOSTS ayar\u0131n\u0131 yap\u0131n.")
-    url_count = int(st.session_state.get("pds_url_count", 1))
-    if st.button("Daha fazla URL ekle", key="add_pds_url"):
-        st.session_state["pds_url_count"] = url_count + 1
-        st.rerun()
-    url_rows = []
-    for index in range(url_count):
-        pds_type = st.selectbox(
-            f"PDS \u00fcr\u00fcn t\u00fcr\u00fc {index + 1}",
-            options=list(pds_type_labels),
-            format_func=lambda code: translate(pds_type_labels[code], language),
-            key=f"pds_type_{index}",
-        )
-        pds_url = st.text_input(
-            f"PDS dosya URL\u2019si {index + 1}",
-            value="",
-            placeholder="https://your-host.example/path/product.ext",
-            key=f"pds_img_url_{index}",
-        )
-        url_rows.append((pds_type, pds_url.strip()))
+    st.write("Dosya indirme adreslerini a\u015fa\u011f\u0131ya yap\u0131\u015ft\u0131r\u0131n; dosya t\u00fcrleri URL uzant\u0131s\u0131ndan otomatik tan\u0131n\u0131r. IMG i\u00e7in e\u015fle\u015fen HDR dosyas\u0131 kendili\u011finden indirilir.")
+    st.caption("PDS ve herkese a\u00e7\u0131k GitHub Release dosya adresleri desteklenir. GitHub'da Release sayfas\u0131n\u0131n de\u011fil, Assets alt\u0131ndaki dosyan\u0131n ba\u011flant\u0131s\u0131n\u0131 kopyalay\u0131n. Ba\u015fka bir HTTPS sunucusu i\u00e7in MARS_DATA_ALLOWED_HOSTS ayar\u0131n\u0131 yap\u0131n.")
+    raw_pds_urls = st.text_area(
+        "Dosya URL'leri (her satıra bir bağlantı)",
+        placeholder=(
+            "https://github.com/.../releases/download/.../mars_study_area.img\n"
+            "https://github.com/.../releases/download/.../emars_data.nc\n"
+            "https://github.com/.../releases/download/.../mcd_temperature.txt"
+        ),
+        height=150,
+        key="pds_bulk_urls",
+    )
     start_download = st.button("PDS verilerini indir ve analize haz\u0131rla", type="primary")
 
     if start_download:
-        requested_rows = [(kind, url) for kind, url in url_rows if url]
+        extension_types = {
+            ".img": "img",
+            ".tif": "tiff",
+            ".tiff": "tiff",
+            ".nc": "nc",
+            ".txt": "txt",
+        }
+        requested_rows = []
         downloaded_assets = []
         new_ds = None
         status = None
         try:
+            for raw_url in raw_pds_urls.replace(";", chr(10)).splitlines():
+                url = raw_url.strip()
+                if not url:
+                    continue
+                suffix = Path(urlsplit(url).path).suffix.lower()
+                if suffix in (".hdr", ".lbl"):
+                    continue
+                kind = extension_types.get(suffix)
+                if kind is None:
+                    raise ValueError(f"URL uzant\u0131s\u0131ndan dosya t\u00fcr\u00fc anla\u015f\u0131lamad\u0131 ({suffix or 'missing extension'}): {url}")
+                requested_rows.append((kind, url))
             if not requested_rows:
-                raise ValueError("En az bir PDS URL adresi girin.")
+                raise ValueError("En az bir doğrudan .img, .tif, .tiff, .nc veya .txt dosya URL'si girin.")
             if sum(kind == "nc" for kind, _ in requested_rows) > 1:
                 raise ValueError("Her indirmede yaln\u0131zca bir EMARS NetCDF dosyas\u0131 se\u00e7in.")
             status = st.status("PDS verileri indiriliyor...", expanded=True)
@@ -656,12 +666,15 @@ if source_mode == "pds":
     if not products:
         st.info("Analizden \u00f6nce en az bir PDS DEM URL\u2019si indirmeniz gerekiyor.")
         st.stop()
-    selected_product_index = st.selectbox(
-        "Analiz edilecek DEM \u00fcr\u00fcn\u00fc",
-        options=list(range(len(products))),
-        format_func=lambda index: f"{translate(pds_type_labels[products[index]['kind']], language)} | {products[index]['url']}",
-        key="selected_pds_product_index",
-    )
+    if len(products) == 1:
+        selected_product_index = 0
+    else:
+        selected_product_index = st.selectbox(
+            "Analiz edilecek DEM \u00fcr\u00fcn\u00fc",
+            options=list(range(len(products))),
+            format_func=lambda index: f"{translate(pds_type_labels[products[index]['kind']], language)} | {products[index]['url']}",
+            key="selected_pds_product_index",
+        )
     product = products[selected_product_index]
     if not os.path.exists(product["path"]):
         st.warning("PDS ge\u00e7ici dosyas\u0131 bulunamad\u0131. Dosyay\u0131 yeniden indirin.")
