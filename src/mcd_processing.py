@@ -197,6 +197,7 @@ def load_mcd_from_urls(urls: list[str]) -> list[dict]:
 def plot_mcd_layer(
     layer: dict,
     vertices: list[tuple[float, float]] | None = None,
+    target_vertices: list[tuple[float, float]] | None = None,
     language: str = "tr",
 ):
     """
@@ -210,6 +211,10 @@ def plot_mcd_layer(
     latitudes = np.asarray(layer["latitudes"], dtype=float)
     longitudes = np.asarray(layer["longitudes"], dtype=float)
     values = np.asarray(layer["values"], dtype=float)
+
+    # MCD sources may use east longitudes in either 0–360 or ±180 degrees.
+    # Keep the map grid in the same longitude system as the study overlays.
+    longitudes = ((longitudes + 180.0) % 360.0) - 180.0
 
     # Koordinatların sıralama indeksleri
     lat_order = np.argsort(latitudes)
@@ -348,8 +353,10 @@ def plot_mcd_layer(
         dpi=180,
     )
 
+    map_cmap = plt.get_cmap("coolwarm").copy()
+    map_cmap.set_bad("#d8d8d8")
     image = ax.imshow(
-        fine_values,
+        np.ma.masked_invalid(fine_values),
         extent=[
             longitudes.min(),
             longitudes.max(),
@@ -358,10 +365,13 @@ def plot_mcd_layer(
         ],
         origin="lower",
         aspect="auto",
-        cmap="coolwarm",
+        cmap=map_cmap,
         interpolation="bilinear",
     )
 
+    # Keep the axes on the actual source grid. Expanding them to include an
+    # unrelated study polygon creates a blank area that looks like missing
+    # map rendering and can imply temperature coverage where none exists.
     ax.set_xlim(longitudes.min(), longitudes.max())
     ax.set_ylim(latitudes.min(), latitudes.max())
 
@@ -372,6 +382,24 @@ def plot_mcd_layer(
         ax.set_xlabel("Doğu boylamı (°E)")
         ax.set_ylabel("Kuzey enlemi (°N)")
     ax.set_title(layer["description"])
+
+    if vertices is not None:
+        polygon = np.asarray(vertices, dtype=float).copy()
+        polygon[:, 0] = ((polygon[:, 0] + 180) % 360) - 180
+        polygon = np.vstack((polygon, polygon[0]))
+        ax.plot(polygon[:, 0], polygon[:, 1], color="white", linewidth=1.8,
+                linestyle="--", label=("Lycus Sulci triangle" if language == "en"
+                                        else "Lycus Sulci üçgeni"), zorder=4)
+    if target_vertices is not None:
+        target = np.asarray(target_vertices, dtype=float).copy()
+        target[:, 0] = ((target[:, 0] + 180) % 360) - 180
+        target = np.vstack((target, target[0]))
+        ax.fill(target[:-1, 0], target[:-1, 1], color="#ff8c00", alpha=0.18, zorder=3)
+        ax.plot(target[:, 0], target[:, 1], color="#ff8c00", linewidth=2,
+                label=("Research target region" if language == "en"
+                       else "Araştırma hedef bölgesi"), zorder=5)
+    if vertices is not None or target_vertices is not None:
+        ax.legend(loc="upper right")
 
     ax.grid(
         True,

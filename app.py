@@ -75,6 +75,10 @@ st.set_page_config(
 )
 
 with st.sidebar:
+    st.image(
+        str(Path(__file__).resolve().parent / "assets" / "steel-mars-run-logo.png"),
+        width=180,
+    )
     language = st.selectbox(
         "Dil / Language",
         options=["tr", "en"],
@@ -87,7 +91,7 @@ tx = lambda text: translate(text, language)
 st.title("Steel Mars Run")
 st.caption("Mars topografya verisi · DEM görüntüleme · Bölgesel eğim incelemesi")
 st.info(
-    "Render kullanımı için önerilen yöntem PDS arşivinden doğrudan indirmedir. "
+    "Önerilen yöntem PDS arşivinden doğrudan indirmedir. "
     "IMG dosyası geçici diske parça parça indirilir ve RAM'e bütünüyle kopyalanmadan açılır. "
     "Sonuçlar ön inceleme amaçlıdır; tek başına iniş güvenliği kararı üretmez."
 )
@@ -98,7 +102,7 @@ with st.sidebar:
         "MOLA verisini nereden alalım?",
         options=["pds", "local"],
         format_func=lambda mode: translate(
-            "PDS arşivinden indir (Render için önerilen)" if mode == "pds" else "Bilgisayardan yükle (yerel kullanım)",
+            "PDS arşivinden indir (önerilen)" if mode == "pds" else "Bilgisayardan yükle (yerel kullanım)",
             language,
         ),
         index=1,
@@ -121,6 +125,7 @@ with st.sidebar:
         help="1: Her pikselde eğim hesaplanır.",
     )
 
+    st.caption("İletişim: extrahesap3712@gmail.com")
 
 
 MAX_LOCAL_IMG_SIZE = 50 * 1024 * 1024
@@ -443,6 +448,7 @@ if st.session_state.get("emars_ds") is not None:
                         colorbar_label=f"{display_label} ({units})",
                         cmap="RdBu_r" if component else "cividis",
                         vertices=DEFAULT_STUDY_AREA_VERTICES,
+                        target_vertices=RESEARCH_ZONE_LONLAT,
                         vmin=-limit if component else None,
                         vmax=limit if component else None,
                         language=language,
@@ -494,16 +500,70 @@ if st.session_state.get("mcd_layers"):
             with tab:
                 st.subheader(layer["description"])
                 try:
-                    fig, stats = plot_mcd_layer(layer, language=language)
+                    fig, stats = plot_mcd_layer(
+                        layer, vertices=DEFAULT_STUDY_AREA_VERTICES,
+                        target_vertices=RESEARCH_ZONE_LONLAT, language=language,
+                    )
                     st.pyplot(fig, width="stretch")
                     plt.close(fig)
+                    source_lons = ((np.asarray(layer["longitudes"], dtype=float) + 180.0) % 360.0) - 180.0
+                    source_lats = np.asarray(layer["latitudes"], dtype=float)
+                    target_points = np.asarray(RESEARCH_ZONE_LONLAT, dtype=float)
+                    target_points[:, 0] = ((target_points[:, 0] + 180.0) % 360.0) - 180.0
+                    study_points = np.asarray(DEFAULT_STUDY_AREA_VERTICES, dtype=float)
+                    study_points[:, 0] = ((study_points[:, 0] + 180.0) % 360.0) - 180.0
+                    def within_source_bounds(points):
+                        return (
+                            source_lons.min() <= points[:, 0].min()
+                            and source_lons.max() >= points[:, 0].max()
+                            and source_lats.min() <= points[:, 1].min()
+                            and source_lats.max() >= points[:, 1].max()
+                        )
+                    target_covered = within_source_bounds(target_points)
+                    study_covered = within_source_bounds(study_points)
+                    if not target_covered or not study_covered:
+                        missing_areas = []
+                        if not study_covered:
+                            missing_areas.append(
+                                "the triangular study area" if language == "en"
+                                else "üçgen çalışma alanı"
+                            )
+                        if not target_covered:
+                            missing_areas.append(
+                                "the target region" if language == "en" else "hedef bölge"
+                            )
+                        if language == "en":
+                            warning = (
+                                "This temperature layer does not fully cover "
+                                f"{' and '.join(missing_areas)}. The map shows only the area covered by the source data; "
+                                "gray areas indicate missing temperature cells. Pixels outside coverage have no "
+                                "temperature value. Source range: longitude "
+                                f"{source_lons.min():.3f}°–{source_lons.max():.3f}°, "
+                                f"latitude {source_lats.min():.3f}°–{source_lats.max():.3f}°."
+                            )
+                        else:
+                            warning = (
+                                f"Bu sıcaklık katmanının koordinat kapsamı {' ve '.join(missing_areas)} tamamen içermiyor. "
+                                "Harita yalnızca kaynak verinin alanını gösterir; gri alanlar eksik sıcaklık hücreleridir. "
+                                "Kapsam dışındaki pikseller sıcaklık katmanından değer almaz. "
+                                f"Okunan kaynak aralığı: boylam {source_lons.min():.3f}°–{source_lons.max():.3f}°, "
+                                f"enlem {source_lats.min():.3f}°–{source_lats.max():.3f}°."
+                            )
+                        st.warning(warning)
                     cols = st.columns(3)
-                    unit = layer.get("unit") or "birim belirtilmemiş"
+                    unit = layer.get("unit") or (
+                        "unit not specified" if language == "en" else "birim belirtilmemiş"
+                    )
                     cols[0].metric("Minimum", f"{stats['min']:.3f} {unit}")
                     cols[1].metric("Ortalama", f"{stats['mean']:.3f} {unit}")
                     cols[2].metric("Maksimum", f"{stats['max']:.3f} {unit}")
                 except Exception as exc:
-                    st.error(f"{layer['description']} haritası üretilemedi: {exc}")
+                    error_message = (
+                        f"Could not generate {layer['description']} map: {exc}"
+                        if language == "en"
+                        else f"{layer['description']} haritası üretilemedi: {exc}"
+                    )
+                    st.error(error_message)
 
 # MCD ATMOSFERİK VERİ KATMANLARI
 # --------------------------------------------------
@@ -524,7 +584,10 @@ if st.session_state.get("mcd_layers"):
         st.subheader(layer["description"])
 
         try:
-            fig, stats = plot_mcd_layer(layer, language=language)
+            fig, stats = plot_mcd_layer(
+                layer, vertices=DEFAULT_STUDY_AREA_VERTICES,
+                target_vertices=RESEARCH_ZONE_LONLAT, language=language,
+            )
 
             st.pyplot(fig, width="stretch")
             plt.close(fig)
@@ -771,6 +834,24 @@ image = ax.imshow(
     origin="upper",
     interpolation="nearest",
 )
+preview_info = parse_geographic_map_info(metadata)
+preview_vertices = DEFAULT_STUDY_AREA_VERTICES + [DEFAULT_STUDY_AREA_VERTICES[0]]
+preview_triangle = [
+    geographic_to_pixel(lon, lat, preview_info) for lon, lat in preview_vertices
+]
+preview_target = [
+    geographic_to_pixel(lon, lat, preview_info)
+    for lon, lat in RESEARCH_ZONE_LONLAT + [RESEARCH_ZONE_LONLAT[0]]
+]
+ax.plot([p[1] / display_step for p in preview_triangle],
+        [p[0] / display_step for p in preview_triangle], color="cyan", linewidth=1.5,
+        linestyle="--", label=tx("Lycus Sulci üçgeni"))
+ax.fill([p[1] / display_step for p in preview_target[:-1]],
+        [p[0] / display_step for p in preview_target[:-1]], color="#ff8c00", alpha=0.18)
+ax.plot([p[1] / display_step for p in preview_target],
+        [p[0] / display_step for p in preview_target], color="#ff8c00", linewidth=1.8,
+        label=tx("Araştırma hedef bölgesi"))
+ax.legend(loc="upper right")
 ax.set_title(tx("Topografya rasterı   örneklenmiş görünüm"))
 ax.set_xlabel(tx("Raster sütunu (piksel)"))
 ax.set_ylabel(tx("Raster satırı (piksel)"))
@@ -874,12 +955,24 @@ try:
         for lon, lat in zip(polygon_lon, polygon_lat)
     ]
 
+    target_closed = RESEARCH_ZONE_LONLAT + [RESEARCH_ZONE_LONLAT[0]]
+    target_cols = [
+        geographic_to_pixel(lon, lat, map_info)[1] - study_area["col_start"]
+        for lon, lat in target_closed
+    ]
+    target_rows = [
+        geographic_to_pixel(lon, lat, map_info)[0] - study_area["row_start"]
+        for lon, lat in target_closed
+    ]
+
     ax_area.plot(
         polygon_cols,
         polygon_rows,
         linewidth=2,
         color="red",
     )
+    ax_area.fill(target_cols[:-1], target_rows[:-1], color="#ff8c00", alpha=0.18)
+    ax_area.plot(target_cols, target_rows, color="#ff8c00", linewidth=2, label=tx("Araştırma hedef bölgesi"))
 
     for index, (x, y) in enumerate(
         zip(polygon_cols[:-1], polygon_rows[:-1])
@@ -1037,6 +1130,9 @@ try:
                 linewidth=1.5,
         label=tx("Çalışma alanı sınırı"),
             )
+            ax_rough.fill(target_cols[:-1], target_rows[:-1], color="#ff8c00", alpha=0.18)
+            ax_rough.plot(target_cols, target_rows, color="#ff8c00", linewidth=2,
+                          label=tx("Araştırma hedef bölgesi"))
 
             ax_rough.scatter(
                 polygon_cols[:-1],
@@ -1178,6 +1274,13 @@ try:
             triangle_rows.append(row_index)
             triangle_cols.append(col_index)
 
+        target_slope_rows = []
+        target_slope_cols = []
+        for lon, lat in target_closed:
+            row, col = geographic_to_pixel(float(lon), float(lat), map_info)
+            target_slope_rows.append(int(np.argmin(np.abs(slope_rows - row))))
+            target_slope_cols.append(int(np.argmin(np.abs(slope_cols - col))))
+
         triangle_rows.append(triangle_rows[0])
         triangle_cols.append(triangle_cols[0])
 
@@ -1203,6 +1306,9 @@ try:
             linewidth=1.5,
                 label=tx("Çalışma alanı sınırı"),
         )
+        ax2.fill(target_slope_cols[:-1], target_slope_rows[:-1], color="#ff8c00", alpha=0.18)
+        ax2.plot(target_slope_cols, target_slope_rows, color="#ff8c00", linewidth=2,
+                 label=tx("Araştırma hedef bölgesi"))
 
         ax2.scatter(
             triangle_cols[:-1],
@@ -1425,12 +1531,14 @@ try:
     st.pyplot(fig_land, width="stretch")
     plt.close(fig_land)
     if landing["candidates"]:
+        destination_center = np.mean(np.asarray(RESEARCH_ZONE_LONLAT, dtype=float), axis=0)
         st.table([{
             "Sıra": site["rank"],
             "Boylam (°)": round(site["longitude"], 5),
             "Enlem (°)": round(site["latitude"], 5),
-            "Uygunluk": round(site["score"], 1),
-            "Veri güvenilirliği": f"{site['data_reliability']:.1f}%",
+            "Varış bölgesi merkezi boylam (°)": round(float(destination_center[0]), 5),
+            "Varış bölgesi merkezi enlem (°)": round(float(destination_center[1]), 5),
+            "Veri güvenilirliği (%)": round(site["data_reliability"], 1),
         } for site in landing["candidates"]])
     st.caption("Yıldızlar sıralanmış adaylardır; 4 km yakınlık eşiği kümelenmeyi azaltır. Yüksek çözünürlüklü DEM içinde arama aralığı üçgenin içi, üçgeni kapsamayan bölgesel DEM içinde arama aralığı raster kapsamıdır. Bu sonuçlar görev doğrulamalı iniş emniyeti değildir.")
 
@@ -1493,6 +1601,10 @@ try:
                 route_rows.append({
                     "Rota": route["label"],
                     "İniş adayı": route["site"]["rank"],
+                    "Başlangıç boylamı (°)": round(float(route["longitudes"][0]), 5),
+                    "Başlangıç enlemi (°)": round(float(route["latitudes"][0]), 5),
+                    "Bitiş boylamı (°)": round(float(route["longitudes"][-1]), 5),
+                    "Bitiş enlemi (°)": round(float(route["latitudes"][-1]), 5),
                     "Hedefe giriş": route["target_entry"],
                     "Uygunluk": round(route["site"]["score"], 1),
                     "Rota uzunluğu (km)": round(route["distance_km"], 2),
@@ -1541,6 +1653,9 @@ try:
                 ax_route.plot(x, y, color=color, linewidth=5, alpha=0.18, solid_capstyle="round")
                 ax_route.plot(x, y, color=color, linewidth=2.4, linestyle=style, alpha=1.0, label=f"{tx('Rota')} {route['label']}")
                 ax_route.scatter(x[0], y[0], color=[color], edgecolor="white", s=48, zorder=4)
+                if not build_routes or progress >= 1.0:
+                    ax_route.scatter(x[-1], y[-1], marker="X", color=[color],
+                                     edgecolor="white", linewidth=0.8, s=62, zorder=5)
                 label_offsets = [(-8, 9), (8, 9), (-8, -11), (8, -11)]
                 ax_route.annotate(route["label"], (x[0], y[0]), xytext=label_offsets[route_number % len(label_offsets)], textcoords="offset points", color="white", weight="bold", bbox={"boxstyle": "round,pad=0.15", "facecolor": "#18212b", "edgecolor": "none", "alpha": 0.75})
             ax_route.fill(zone_boundary[:-1, 0], zone_boundary[:-1, 1], facecolor="#ff9f1c", alpha=0.25, zorder=2)
@@ -1566,7 +1681,7 @@ try:
                 time.sleep(0.04)
         route_status.empty()
         st.subheader("En iyi rotaların sıralaması")
-        st.caption("A–J sıralaması Dijkstra'nın toplam risk ağırlıklı yol maliyetine göredir; tabloda rota boyunca değişken ortalamaları, uzunluk ve iniş noktası uygunluğu birlikte sunulur.")
+        st.caption("A–J sıralaması Dijkstra'nın toplam risk ağırlıklı yol maliyetine göredir. Başlangıç koordinatları iniş adayını, bitiş koordinatları hedef bölgeye giriş noktasını gösterir.")
         st.table(route_plan["route_rows"])
 except Exception as exc:
     st.error(f"İniş noktası aday haritası oluşturulamadı: {exc}")
@@ -1583,6 +1698,6 @@ st.markdown(
     - Girdi çözünürlüğü küçük kaya, blok ve dar çatlakları göstermeye yetmeyebilir; haritada görülen ayrıntı kaynak gridin ölçeğine bağlıdır.
     - Birleşik uygunluk göstergesi keşif amaçlıdır; görev doğrulamalı iniş güvenliği puanı değildir.
     - NoData pikselleri güvenli arazi olarak yorumlanmaz; analiz dışında tutulur.
-    - PDS indirme yöntemi IMG rasterını geçici diske indirir; dosya Render yeniden başlatıldığında kaybolabilir ve yeniden indirilmesi gerekir.
+    - PDS indirme yöntemi IMG rasterını geçici diske indirir; geçici dosya sunucu yeniden başladığında silinebilir ve yeniden indirilmesi gerekir.
     """
 )

@@ -297,6 +297,7 @@ def plot_emars_map(
     u=None,
     v=None,
     vertices=None,
+    target_vertices=None,
     vmin=None,
     vmax=None,
     language="tr",
@@ -429,6 +430,15 @@ def plot_emars_map(
             label=translate("Lycus Sulci çalışma alanı", language),
         )
 
+    if target_vertices is not None:
+        target = np.asarray(target_vertices, dtype=float).copy()
+        target[:, 0] = ((target[:, 0] + 180) % 360) - 180
+        target = np.vstack((target, target[0]))
+        ax.fill(target[:-1, 0], target[:-1, 1], color="#ff8c00", alpha=0.18, zorder=3)
+        ax.plot(target[:, 0], target[:, 1], color="#ff8c00", linewidth=2,
+                label=translate("Araştırma hedef bölgesi", language), zorder=4)
+
+    if vertices is not None or target_vertices is not None:
         ax.legend(loc="upper right")
 
     # Rüzgâr vektörleri.

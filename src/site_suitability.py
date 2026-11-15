@@ -194,10 +194,19 @@ def rank_landing_sites(
     factors = np.asarray(resolution_factors, dtype=float)
     if factors.shape != (5,) or not np.all(np.isfinite(factors)) or np.any((factors < 0) | (factors > 1)):
         raise ValueError("Her katman için 0–1 aralığında grid güvenilirlik katsayısı gerekli.")
-    # Missing cells and sparse native grids both lower per-cell reliability.
-    reliability = np.mean(np.stack([
+    # Match the summary metric: terrain, thermal, and atmosphere are four
+    # groups. Wind and dust share one atmospheric group so that atmosphere is
+    # not counted twice in candidate-level reliability.
+    layer_reliability = np.stack([
         np.asarray(valid, dtype=float) * factors[index]
         for index, valid in enumerate(available)
+    ], axis=0)
+    atmospheric_reliability = np.mean(layer_reliability[3:5], axis=0)
+    reliability = np.mean(np.stack([
+        layer_reliability[0],
+        layer_reliability[1],
+        layer_reliability[2],
+        atmospheric_reliability,
     ], axis=0), axis=0)
     group_costs = [
         soft_range_cost(slope, config.slope_ideal_deg, config.slope_transition_deg),
