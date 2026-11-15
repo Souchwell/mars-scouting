@@ -1,1 +1,1 @@
-"""Mars Base Scout application modules."""
+"""Steel Mars Run application modules."""

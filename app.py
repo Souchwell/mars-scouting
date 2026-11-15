@@ -68,8 +68,8 @@ from src.analysis import (
 
 
 st.set_page_config(
-    page_title="Mars Base Scout",
-    page_icon="🔴",
+    page_title="Steel Mars Run",
+    page_icon="🏇",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -84,7 +84,7 @@ with st.sidebar:
 st = LocalizedStreamlit(st, language)
 tx = lambda text: translate(text, language)
 
-st.title("Mars Base Scout")
+st.title("Steel Mars Run")
 st.caption("Mars topografya verisi · DEM görüntüleme · Bölgesel eğim incelemesi")
 st.info(
     "Render kullanımı için önerilen yöntem PDS arşivinden doğrudan indirmedir. "

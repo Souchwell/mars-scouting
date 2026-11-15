@@ -1,4 +1,4 @@
-# Mars Base Scout
+# Steel Mars Run
 
 Mars yüzey ve atmosfer verilerini inceleyen Streamlit uygulaması. MOLA/DEM, EMARS NetCDF ve MCD TXT verileriyle Lycus Sulci çevresinde arazi analizi, iniş adayı sıralaması ve araştırma bölgesine rota ön değerlendirmesi sağlar.
 
